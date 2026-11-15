@@ -1173,9 +1173,14 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   // (mobile browsers shift the window under a full-screen overlay): put the app back at the top
   const wasCallScreenOpenRef = useRef(false);
   useEffect(() => {
-    if (callScreenOpen) { wasCallScreenOpenRef.current = true; return; }
+    if (callScreenOpen) {
+      wasCallScreenOpenRef.current = true;
+      window.dispatchEvent(new CustomEvent("chat:call-screen", { detail: { open: true } }));
+      return;
+    }
     if (!wasCallScreenOpenRef.current) return;
     wasCallScreenOpenRef.current = false;
+    window.dispatchEvent(new CustomEvent("chat:call-screen", { detail: { open: false } }));
     const resetScroll = () => {
       window.scrollTo(0, 0);
       document.documentElement.scrollTop = 0;

@@ -110,6 +110,31 @@ const Messages = () => {
     };
   }, []);
 
+  // the chat list must keep its place while the full call screen is open: remember it, put it back after
+  useEffect(() => {
+    let saved = null;
+    const restore = () => {
+      const el = elementRef.current;
+      if (!el || !saved) return;
+      el.scrollTop = saved.stick ? el.scrollHeight : saved.top;
+    };
+    const onCallScreen = (event) => {
+      const el = elementRef.current;
+      if (!el) return;
+      if (event.detail?.open) {
+        saved = { stick: stickToBottomRef.current, top: el.scrollTop };
+        return;
+      }
+      if (!saved) return;
+      restore();
+      requestAnimationFrame(restore);
+      [100, 350, 700].forEach((ms) => setTimeout(restore, ms));
+      setTimeout(() => { saved = null; }, 800);
+    };
+    window.addEventListener("chat:call-screen", onCallScreen);
+    return () => window.removeEventListener("chat:call-screen", onCallScreen);
+  }, []);
+
   useEffect(() => {
     let active = true;
     const loadCallLogs = async () => {

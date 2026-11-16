@@ -6,14 +6,12 @@
     "dev": "next dev --port=3001",
     "build": "next build",
     "start": "next start",
-    "server": "nodemon server.js",
     "lint": "eslint app middleware.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cookies-next": "^4.3.0",
     "emoji-picker-react": "^4.12.0",
-    "express": "^4.21.2",
     "mongoose": "^8.8.4",
     "next": "15.5.29",
     "otpauth": "^9.6.0",
@@ -22,7 +20,6 @@
     "react-dom": "^18",
     "react-hook-form": "^7.53.1",
     "react-icons": "^5.4.0",
-    "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "sonner": "^2.0.8",
     "sweetalert2": "^11.14.5",
@@ -32,7 +29,6 @@
     "@eslint/eslintrc": "^3",
     "eslint": "^9.39.5",
     "eslint-config-next": "15.5.29",
-    "nodemon": "^3.1.9",
     "postcss": "8.5.23",
     "tailwindcss": "^3.4.1"
   },

@@ -561,7 +561,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
   const notifyMissed = useCallback((active, recipients) => {
     if (!active?.isCaller || !recipients?.length) return;
-    fetch("/api/calls/missed", {
+    return fetch("/api/calls/missed", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -570,7 +570,14 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         is_video: active.isVideo,
         recipient_ids: recipients,
       }),
-    }).catch(() => {});
+    }).then(async (response) => {
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Unable to send a missed-call notification.");
+      }
+    }).catch((error) => {
+      console.error("Unable to send a missed-call notification:", error);
+    });
   }, []);
 
   const startCall = async (video) => {
@@ -839,12 +846,16 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   useEffect(() => {
     if (!notificationCallId || !("serviceWorker" in navigator) || typeof Notification === "undefined" || Notification.permission !== "granted") return;
     let active = true;
+    let syncing = false;
     const tag = `active-call-${notificationCallId}`;
     const syncCallNotification = async () => {
+      if (!active || syncing) return;
+      syncing = true;
       try {
         const registration = await navigator.serviceWorker.ready;
         if (!active) return;
         const existing = await registration.getNotifications({ tag });
+        if (!active) return;
         if (document.visibilityState === "visible") {
           existing.forEach((notification) => notification.close());
           return;
@@ -867,6 +878,8 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         });
       } catch (error) {
         console.error("Unable to show the ongoing call notification:", error);
+      } finally {
+        syncing = false;
       }
     };
     const closeCallNotification = () => {
@@ -877,8 +890,12 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     };
     syncCallNotification();
     document.addEventListener("visibilitychange", syncCallNotification);
+    const refreshInterval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") syncCallNotification();
+    }, 1000);
     return () => {
       active = false;
+      clearInterval(refreshInterval);
       document.removeEventListener("visibilitychange", syncCallNotification);
       closeCallNotification();
     };
@@ -1001,8 +1018,10 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       const active = callRef.current;
       if (active?.callId === callId) {
         const connectedFor = active.connectedAt ? Math.floor((Date.now() - active.connectedAt) / 1000) : null;
-        if (reason === "no-answer") notifyMissed(active, active.recipients);
-        updateCallLog(callId, reason === "no-answer" ? "no-answer" : reason === "declined" ? "declined" : "ended");
+        const update = updateCallLog(callId, reason === "no-answer" ? "no-answer" : reason === "declined" ? "declined" : "ended");
+        if (reason === "no-answer" && active.isCaller) {
+          void update.then((saved) => saved && notifyMissed(active, active.recipients));
+        }
         loadCallHistory();
         stopCall(false);
         if (reason === "no-answer") showEnded("No answer", "", endInfo(active), true);
@@ -1066,13 +1085,13 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     const onUnavailable = ({ callId, reason }) => {
       const active = callRef.current;
       if (active?.callId !== callId) return;
-      updateCallLog(callId, reason === "busy" ? "declined" : "no-answer");
+      const update = updateCallLog(callId, reason === "busy" ? "declined" : "no-answer");
       loadCallHistory();
       stopCall(false);
       if (reason === "busy") {
         showEnded("Line busy", active.isGroup ? "Everyone is on another call" : "On another call", endInfo(active), true);
       } else {
-        notifyMissed(active, active.recipients);
+        void update.then((saved) => saved && notifyMissed(active, active.recipients));
         showEnded(active.isGroup ? "Nobody is available" : "Unavailable", "They are offline. We let them know you called.", endInfo(active), true);
       }
     };

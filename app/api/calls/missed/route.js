@@ -5,8 +5,8 @@ import { getSessionUserId } from "@/app/lib/session";
 import { sendPushNotification } from "@/app/lib/pushNotifications";
 import { groupMemberSchema } from "@/app/models/groupMemberModel";
 import { groupSchema } from "@/app/models/groupModel";
-import { messageLogSchema } from "@/app/models/messageLogModel";
 import { userSchema } from "@/app/models/userModel";
+import { getUnreadNotificationCounts } from "@/app/lib/unreadNotificationCounts";
 
 const objectIdPattern = /^[a-f\d]{24}$/i;
 
@@ -69,11 +69,7 @@ export async function POST(request) {
 
   const caller = await userSchema.findById(userId).select("name").lean();
   const ticketId = isGroup ? conversationId : userId;
-  const pendingCounts = await messageLogSchema.aggregate([
-    { $match: { receiver_id: { $in: recipients.map((id) => new mongoose.Types.ObjectId(id)) }, status: 0 } },
-    { $group: { _id: "$receiver_id", count: { $sum: 1 } } },
-  ]);
-  const unreadByUser = new Map(pendingCounts.map((item) => [String(item._id), item.count]));
+  const unreadByUser = await getUnreadNotificationCounts(recipients);
   await sendPushNotification(recipients, (recipientId) => ({
     title: `Missed ${isVideo ? "video" : "voice"} call`,
     body: groupName ? `${caller?.name || "Someone"} @ ${groupName}` : caller?.name || "Someone called you",

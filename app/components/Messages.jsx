@@ -149,6 +149,9 @@ const Messages = () => {
         }
         if (active && requestId === callLogsRequestRef.current) {
           setCallLogs(Array.isArray(result.data) ? result.data : []);
+          if (result.callsMarkedRead) {
+            window.dispatchEvent(new Event("chat:refresh-conversations"));
+          }
         }
       } catch (error) {
         if (active) {

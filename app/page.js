@@ -69,6 +69,7 @@ async function shrinkImage(file, maxSide = 1920) {
 
 const Home = () => {
   const { users, setUsers } = useContext(UserListContext);
+  const [unreadBadgeCount, setUnreadBadgeCount] = useState(null);
   const [isUserListLoading, setIsUserListLoading] = useState(true);
   const [activeUsers, setActiveUsers] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
@@ -390,7 +391,10 @@ const Home = () => {
       if (!response.ok || !result.success) {
         throw new Error(result.message || "Unable to load conversations.");
       }
-      if (requestId === userListRequestRef.current) setUsers(result.data);
+      if (requestId === userListRequestRef.current) {
+        setUsers(result.data);
+        setUnreadBadgeCount(Math.max(0, Number(result.unread_count) || 0));
+      }
     } catch (error) {
       if (requestId === userListRequestRef.current) {
         toast.error(error.message || "Unable to load conversations.");
@@ -436,15 +440,13 @@ const Home = () => {
     getUserList();
   }, [getUserList]);
 
-  const unreadTotal = (Array.isArray(users) ? users : [])
-    .reduce((total, item) => total + Math.max(0, Number(item?.pending) || 0), 0);
   useEffect(() => {
-    if (typeof navigator === "undefined") return;
-    const updateBadge = unreadTotal > 0
-      ? navigator.setAppBadge?.(unreadTotal)
+    if (typeof navigator === "undefined" || unreadBadgeCount === null) return;
+    const updateBadge = unreadBadgeCount > 0
+      ? navigator.setAppBadge?.(unreadBadgeCount)
       : navigator.clearAppBadge?.();
     updateBadge?.catch((error) => console.warn("Unable to update the app unread badge:", error));
-  }, [unreadTotal]);
+  }, [unreadBadgeCount]);
 
   useEffect(() => {
     if (!authUser?._id) return;

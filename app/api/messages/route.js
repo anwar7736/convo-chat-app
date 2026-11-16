@@ -11,6 +11,7 @@ import { createHmac } from "crypto";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 import { callLogConversationMatch, viewCallLog } from "@/app/lib/callLogs";
+import { getUnreadNotificationCounts } from "@/app/lib/unreadNotificationCounts";
 
 const objectIdPattern = /^[a-f\d]{24}$/i;
 
@@ -360,13 +361,7 @@ export async function POST(request) {
     : [];
   const mutedUserIds = new Set(mutedUsers.map(String));
   const pushRecipients = candidatePushRecipients.filter((id) => !mutedUserIds.has(id));
-  const pendingCounts = pushRecipients.length
-    ? await messageLogSchema.aggregate([
-        { $match: { receiver_id: { $in: pushRecipients.map((id) => new mongoose.Types.ObjectId(id)) }, status: 0 } },
-        { $group: { _id: "$receiver_id", count: { $sum: 1 } } },
-      ])
-    : [];
-  const unreadByUser = new Map(pendingCounts.map((item) => [String(item._id), item.count]));
+  const unreadByUser = await getUnreadNotificationCounts(pushRecipients);
   const notificationBody = text || (type === "image" ? "📷 Photo" : type === "audio" ? "🎤 Voice message" : type === "video" ? "🎥 Video" : "📎 Attachment");
   const ticketId = isGroup ? receiver_id : sessionUserId;
   const [senderInfo, groupInfo] = await Promise.all([

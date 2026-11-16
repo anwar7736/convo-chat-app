@@ -6,6 +6,7 @@ import { groupMemberSchema } from "@/app/models/groupMemberModel";
 import { messageLogSchema } from "@/app/models/messageLogModel";
 import { callLogSchema } from "@/app/models/callLogModel";
 import { getSessionUserId } from "@/app/lib/session";
+import { getUnreadNotificationCounts } from "@/app/lib/unreadNotificationCounts";
 
 export async function GET(request) {
     const userId = await getSessionUserId(request);
@@ -16,6 +17,7 @@ export async function GET(request) {
         return NextResponse.json({ success: false, message: 'Unauthorized.' }, { status: 401 });
     }
     await mongoDB_connect();
+    const unreadCounts = await getUnreadNotificationCounts([userId]);
     const authObjectId = new mongoose.Types.ObjectId(userId);
     const currentUser = await userSchema.findById(authObjectId)
         .select("nicknames archivedConversations blockedUsers")
@@ -386,5 +388,9 @@ export async function GET(request) {
                 } : {}),
             };
         }).sort((a, b) => new Date(b.last_activity || 0) - new Date(a.last_activity || 0));
-    return NextResponse.json({ success: true, data: withNicknames });
+    return NextResponse.json({
+        success: true,
+        data: withNicknames,
+        unread_count: unreadCounts.get(userId) || 0,
+    });
 }

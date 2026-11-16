@@ -55,8 +55,21 @@ export async function GET(request) {
     if (conversationId) query.conversationId = new mongoose.Types.ObjectId(conversationId);
     if (isGroup !== null) query.isGroup = isGroup === "1";
   }
+  const readResult = await callLogSchema.updateMany(
+    {
+      ...query,
+      callerId: { $ne: userObjectId },
+      status: "no-answer",
+      readBy: { $ne: userObjectId },
+    },
+    { $addToSet: { readBy: userObjectId } }
+  );
   const data = await callLogSchema.find(query).sort({ startedAt: -1 }).limit(conversationId ? 100 : 50).lean();
-  return NextResponse.json({ success: true, data: data.map((log) => viewCallLog(log, userId)) });
+  return NextResponse.json({
+    success: true,
+    data: data.map((log) => viewCallLog(log, userId)),
+    callsMarkedRead: readResult.modifiedCount > 0,
+  });
 }
 
 export async function DELETE(request) {

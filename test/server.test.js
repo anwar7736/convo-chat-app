@@ -500,3 +500,21 @@ test("a flood of events is cut off", async () => {
   assert.ok(received < 400, `received ${received}`);
   [a, b].forEach((s) => s.disconnect());
 });
+
+test("call: an offline recipient keeps the call ringing and gets the invite when they come online", async () => {
+  const a = await connect(A);
+  const ringing = next(a, "call:ringing");
+  const noUnavailable = next(a, "call:unavailable");
+  const callId = randomUUID();
+  a.emit("call:invite", { callId, recipients: [B], callerName: "A" });
+  assert.equal((await ringing).callId, callId);
+  assert.equal(await noUnavailable, "none"); // not "unavailable": the call keeps ringing
+
+  const b = await connect(B, { register: false });
+  const pendingInvite = next(b, "call:invite", 1500);
+  b.emit("register-user");
+  const invite = await pendingInvite;
+  assert.equal(invite.callId, callId);
+  assert.equal(invite.callerId, A);
+  [a, b].forEach((socket) => socket.disconnect());
+});

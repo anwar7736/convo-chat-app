@@ -52,6 +52,9 @@ const MAX_CALL_PARTICIPANTS = 8;
 // the caller closing the app or losing the connection still ends it at once. This is only a safety stop for a call
 // left ringing on an unattended phone.
 const CALL_MAX_RING_MS = 10 * 60 * 1000;
+// someone who is offline when called still gets the call for a while: the caller keeps seeing "Ringing",
+// and the invite reaches them if they come online before it runs out
+const CALL_OFFLINE_RING_MS = 60 * 1000;
 // per socket: a burst of events (a group call sends many ICE candidates at once), then a steady rate
 const EVENT_BURST = 300;
 const EVENT_RATE = 30;
@@ -170,6 +173,12 @@ io.on("connection", (socket) => {
 
   socket.on("register-user", () => {
     onlineUsers.add(userId);
+    // a call placed while this person was offline is still ringing: hand it over now
+    for (const call of calls.values()) {
+      if (call.offlineRecipients?.delete(userId) && !call.accepted.has(userId) && !call.rejected.has(userId)) {
+        emitToUser(userId, "call:invite", call.invitePayload);
+      }
+    }
     const active = Array.from(onlineUsers);
     socket.emit("active-users", active);
     socket.broadcast.emit("active-users", active);
@@ -480,23 +489,39 @@ io.on("connection", (socket) => {
 
     const invited = new Set([userId]);
     const availableRecipients = [];
+    const offlineRecipients = new Set();
     let busyRecipients = 0;
     for (const recipientId of invite.recipients) {
-      if (!isObjectId(recipientId) || recipientId === userId || !onlineUsers.has(recipientId)) continue;
+      if (!isObjectId(recipientId) || recipientId === userId || invited.has(recipientId)) continue;
       if (findCallForUser(recipientId)) {
         busyRecipients += 1;
         socket.emit("call:busy", { callId: invite.callId, userId: recipientId });
         continue;
       }
       invited.add(recipientId);
-      availableRecipients.push(recipientId);
+      if (onlineUsers.has(recipientId)) availableRecipients.push(recipientId);
+      else offlineRecipients.add(recipientId);
     }
     if (invited.size === 1) {
       socket.emit("call:unavailable", { callId: invite.callId, reason: busyRecipients ? "busy" : "offline" });
       return;
     }
-    const timer = setTimeout(() => endCall(invite.callId, null, "no-answer"), CALL_MAX_RING_MS);
+    const timer = setTimeout(
+      () => endCall(invite.callId, null, "no-answer"),
+      availableRecipients.length ? CALL_MAX_RING_MS : CALL_OFFLINE_RING_MS
+    );
+    const invitePayload = {
+      callId: invite.callId,
+      callerId: userId,
+      callerName: String(invite.callerName || "Someone").slice(0, 80),
+      conversationName: String(invite.conversationName || "").slice(0, 80),
+      conversationId: isObjectId(invite.conversationId) ? invite.conversationId : "",
+      isGroup: Boolean(invite.isGroup),
+      isVideo: Boolean(invite.isVideo),
+    };
     calls.set(invite.callId, {
+      invitePayload,
+      offlineRecipients,
       callerId: userId,
       invited,
       accepted: new Set([userId]),
@@ -504,17 +529,7 @@ io.on("connection", (socket) => {
       sockets: new Map([[userId, socket.id]]),
       timer,
     });
-    for (const recipientId of availableRecipients) {
-      emitToUser(recipientId, "call:invite", {
-        callId: invite.callId,
-        callerId: userId,
-        callerName: String(invite.callerName || "Someone").slice(0, 80),
-        conversationName: String(invite.conversationName || "").slice(0, 80),
-        conversationId: isObjectId(invite.conversationId) ? invite.conversationId : "",
-        isGroup: Boolean(invite.isGroup),
-        isVideo: Boolean(invite.isVideo),
-      });
-    }
+    for (const recipientId of availableRecipients) emitToUser(recipientId, "call:invite", invitePayload);
     socket.emit("call:ringing", { callId: invite.callId });
   });
 

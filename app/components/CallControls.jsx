@@ -1170,6 +1170,14 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       }
     };
   }, [callScreenOpen]);
+  // when the full call screen goes away (minimized, ended, phone Back) the chat list goes to the bottom
+  const callScreenWasOpenRef = useRef(false);
+  useEffect(() => {
+    if (callScreenOpen) { callScreenWasOpenRef.current = true; return; }
+    if (!callScreenWasOpenRef.current) return;
+    callScreenWasOpenRef.current = false;
+    window.dispatchEvent(new Event("chat:scroll-bottom"));
+  }, [callScreenOpen]);
   // the small "call in progress" bar can be dragged anywhere on screen (a tap still presses its buttons)
   const [miniOffset, setMiniOffset] = useState({ x: 0, y: 0 });
   const miniDragRef = useRef(null);

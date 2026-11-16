@@ -114,9 +114,23 @@ const Messages = () => {
 
   // starting a call presses the scroll-to-bottom arrow (the list can be left at the top afterwards)
   useEffect(() => {
-    const onScrollBottom = () => jumpToBottomRef.current();
+    const timers = [];
+    const toBottom = () => {
+      const el = elementRef.current;
+      if (!el) return;
+      stickToBottomRef.current = true;
+      el.scrollTop = el.scrollHeight; // instant: the list can be reset to the top while the call screen opens/closes
+    };
+    const onScrollBottom = () => {
+      jumpToBottomRef.current();
+      toBottom();
+      [60, 200, 500, 1000].forEach((ms) => timers.push(setTimeout(toBottom, ms)));
+    };
     window.addEventListener("chat:scroll-bottom", onScrollBottom);
-    return () => window.removeEventListener("chat:scroll-bottom", onScrollBottom);
+    return () => {
+      window.removeEventListener("chat:scroll-bottom", onScrollBottom);
+      timers.forEach(clearTimeout);
+    };
   }, []);
 
   useEffect(() => {

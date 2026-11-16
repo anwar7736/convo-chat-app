@@ -1,4 +1,5 @@
 import { useContext, useEffect, useRef, useState } from "react";
+import { AuthContext } from "../contexts/AuthContext";
 import {
   FiArchive,
   FiFile,
@@ -37,6 +38,7 @@ const conversationDateLabel = (value) => {
 
 const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) => {
   const { user, setUser } = useContext(UserContext);
+  const { user: authUser } = useContext(AuthContext); // the logged-in person (user above is the open chat)
   const { users, setUsers } = useContext(UserListContext);
   const { setMessages, setCallLogs } = useContext(MessageContext);
   const [requestId, setRequestId] = useState(null);
@@ -171,8 +173,8 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
           const isCallPreview = contact?.last_activity_kind === "call";
           const isMissedCall = isCallPreview &&
             contact?.last_call_status === "no-answer" &&
-            String(contact?.last_call_caller_id) !== String(user?._id);
-          const mine = !isCallPreview && contact?.last_message_sender_id === user?._id;
+            String(contact?.last_call_caller_id) !== String(authUser?._id);
+          const mine = !isCallPreview && contact?.last_message_sender_id === authUser?._id;
           const callType = contact?.last_call_is_video ? "Video call" : "Voice call";
           const callLabel = isMissedCall
             ? `Missed ${callType.replace(" call", " Call")}`
@@ -196,7 +198,7 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
               ? FiPhoneMissed
               : contact?.last_call_is_video
                 ? FiVideo
-                : String(contact?.last_call_caller_id) === String(user?._id)
+                : String(contact?.last_call_caller_id) === String(authUser?._id)
                   ? FiPhoneOutgoing
                   : FiPhoneIncoming
             : mediaPreview?.Icon;

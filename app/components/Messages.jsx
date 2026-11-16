@@ -80,6 +80,7 @@ const Messages = () => {
     localCountRef.current = localMessages.length;
   }, [localMessages.length]);
 
+  const jumpToBottomRef = useRef(() => {});
   const jumpToBottom = () => {
     const el = elementRef.current;
     if (!el) return;
@@ -87,6 +88,7 @@ const Messages = () => {
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     setUnseen(0);
   };
+  jumpToBottomRef.current = jumpToBottom;
 
   useEffect(() => {
     const el = elementRef.current;
@@ -110,29 +112,11 @@ const Messages = () => {
     };
   }, []);
 
-  // the chat list must keep its place while the full call screen is open: remember it, put it back after
+  // starting a call presses the scroll-to-bottom arrow (the list can be left at the top afterwards)
   useEffect(() => {
-    let saved = null;
-    const restore = () => {
-      const el = elementRef.current;
-      if (!el || !saved) return;
-      el.scrollTop = saved.stick ? el.scrollHeight : saved.top;
-    };
-    const onCallScreen = (event) => {
-      const el = elementRef.current;
-      if (!el) return;
-      if (event.detail?.open) {
-        saved = { stick: stickToBottomRef.current, top: el.scrollTop };
-        return;
-      }
-      if (!saved) return;
-      restore();
-      requestAnimationFrame(restore);
-      [100, 350, 700].forEach((ms) => setTimeout(restore, ms));
-      setTimeout(() => { saved = null; }, 800);
-    };
-    window.addEventListener("chat:call-screen", onCallScreen);
-    return () => window.removeEventListener("chat:call-screen", onCallScreen);
+    const onScrollBottom = () => jumpToBottomRef.current();
+    window.addEventListener("chat:scroll-bottom", onScrollBottom);
+    return () => window.removeEventListener("chat:scroll-bottom", onScrollBottom);
   }, []);
 
   useEffect(() => {

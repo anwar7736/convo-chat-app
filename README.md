@@ -5,8 +5,8 @@ Next.js chat client backed by MongoDB and a separate authenticated Socket.IO ser
 ## Local setup
 
 1. Copy `.env.example` to `.env.local` in this directory and configure MongoDB, an `AUTH_SECRET` (at least 32 characters), and Resend.
-2. Copy `Socket-Server/.env.example` to `Socket-Server/.env`. Use the **same** `AUTH_SECRET` in both files.
-3. In `Socket-Server`, install dependencies if needed and run `npm run dev`.
+2. Copy `socket-server/.env.example` to `socket-server/.env`. Use the **same** `AUTH_SECRET` in both files.
+3. In `socket-server`, install dependencies if needed and run `npm run dev`.
 4. In `nextjs-socketio-chat-app`, run `npm run dev`.
 5. Open `http://localhost:3001`.
 
@@ -36,7 +36,7 @@ docker run --name convo-chat-web \
 
 For production, replace the local Socket.IO URL with its public HTTPS origin. If using Web Push, pass `NEXT_PUBLIC_VAPID_PUBLIC_KEY` as a build argument too; it is a public key, not a secret. The runtime environment file must contain the server-side settings from `.env.example`, including `MONGODB_URI` (or the supported DB triplet) and the shared `AUTH_SECRET`. Do not copy environment files or secrets into the image. When MongoDB runs on the Docker host, use a host-reachable address rather than `localhost` from inside the container.
 
-The standalone image listens on port `3001`. Run the separately containerized Socket.IO server using the [Socket-Server Docker instructions](https://github.com/anwar7736/Socket-Server#docker).
+The standalone image listens on port `3001`. Run the separately containerized Socket.IO server using the [socket-server Docker instructions](socket-server/README.md).
 
 ## Chat features
 

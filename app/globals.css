@@ -2682,3 +2682,24 @@ button.nickname-person:hover {
 .call-mini-bar:active {
   cursor: grabbing;
 }
+
+/* WhatsApp-style tap to hide/show call controls */
+.call-screen.is-controls-hidden .call-actions,
+.call-screen.is-controls-hidden .call-minimize-button,
+.call-screen.is-controls-hidden .call-muted-pill,
+.call-screen.is-controls-hidden .call-sub,
+.call-screen.is-controls-hidden .call-debug {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.call-screen.is-controls-hidden .call-hero {
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.call-screen .call-actions,
+.call-screen .call-minimize-button,
+.call-screen .call-muted-pill,
+.call-screen .call-hero {
+  transition: opacity 0.25s ease;
+}

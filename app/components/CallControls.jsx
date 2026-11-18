@@ -151,6 +151,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const [localVideoExpanded, setLocalVideoExpanded] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [callMinimized, setCallMinimized] = useState(false);
+  const [controlsHidden, setControlsHidden] = useState(false);
   const [remoteMedia, setRemoteMedia] = useState({});
   // call diagnostics: shown under the status when a call stays on "Connecting…" (to see where it stops)
   const diagRef = useRef(null);
@@ -227,6 +228,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     setRemoteStreams({});
     setMuted(false);
     setCameraOff(false);
+    setControlsHidden(false);
     setFacingMode("user");
     setLocalVideoExpanded(false);
     setCallMinimized(false);
@@ -254,6 +256,29 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
   const loadCallHistory = useCallback(() => {
     window.dispatchEvent(new Event("chat:refresh-call-logs"));
+  }, []);
+
+  // when the partner updates their profile or the user updates a nickname, reflect it live in the call screen
+  useEffect(() => {
+    const onUserUpdated = (event) => {
+      const updated = event.detail;
+      if (!updated?._id || !callRef.current) return;
+      const active = callRef.current;
+      const isPartner = !active.isGroup && (
+        String(active.conversationId) === String(updated._id) ||
+        (!active.isCaller && String(active.callerId) === String(updated._id))
+      );
+      if (!isPartner) return;
+      const patch = {};
+      if (updated.name) patch.conversationName = updated.nickname || updated.name;
+      if (updated.photo !== undefined) patch.photo = updated.photo;
+      if (!Object.keys(patch).length) return;
+      const next = { ...active, ...patch };
+      callRef.current = next;
+      setCall(next);
+    };
+    window.addEventListener("chat:user-updated", onUserUpdated);
+    return () => window.removeEventListener("chat:user-updated", onUserUpdated);
   }, []);
 
   useEffect(() => {
@@ -488,10 +513,49 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     return peer;
   }, [removePeer]);
 
+  const enableCameraInAudioCall = async () => {
+    if (!callRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+      const videoTrack = stream.getVideoTracks()[0];
+      if (!videoTrack) return;
+      for (const peer of peersRef.current.values()) {
+        peer.addTrack(videoTrack, localStreamRef.current);
+      }
+      localStreamRef.current.addTrack(videoTrack);
+      setCameraOff(false);
+      const upgraded = { ...callRef.current, isVideo: true };
+      callRef.current = upgraded;
+      setCall(upgraded);
+      socket.emit("call:media-status", { callId: upgraded.callId, muted, cameraOff: false, upgradedToVideo: true });
+      await updateCallLog(upgraded.callId, "upgrade-video");
+    } catch (error) {
+      toast.error("Could not turn camera on: " + (error.message || "unknown error"));
+    }
+  };
+
+  const disableCameraTrack = () => {
+    const tracks = localStreamRef.current?.getVideoTracks() || [];
+    tracks.forEach((track) => { track.enabled = false; track.stop(); localStreamRef.current.removeTrack(track); });
+    const downgraded = { ...callRef.current, isVideo: false };
+    callRef.current = downgraded;
+    setCall(downgraded);
+    socket.emit("call:media-status", { callId: downgraded.callId, muted, cameraOff: false, downgradedToAudio: true });
+  };
+
   const toggleTrack = (kind) => {
     const tracks = kind === "audio" ? localStreamRef.current?.getAudioTracks() : localStreamRef.current?.getVideoTracks();
-    if (!tracks?.length) return;
+    if (!tracks?.length) {
+      if (kind === "video" && callRef.current && !callRef.current.isVideo) {
+        enableCameraInAudioCall();
+      }
+      return;
+    }
     const enabled = !tracks[0].enabled;
+    if (kind === "video" && !enabled) {
+      disableCameraTrack();
+      return;
+    }
     tracks.forEach((track) => { track.enabled = enabled; });
     if (kind === "audio") setMuted(!enabled);
     else setCameraOff(!enabled);
@@ -1250,6 +1314,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
   const minimizeCallScreen = () => {
     setAudioMenuOpen(false);
+    setControlsHidden(false);
     setCallMinimized(true);
   };
   // only the small card swaps the videos (like WhatsApp); a tap on the big full-screen video does nothing
@@ -1334,7 +1399,12 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           {call && (
             <div
               data-call-screen-open={callMinimized ? undefined : "true"}
-              className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""} ${callMinimized ? "is-minimized" : ""} ${localVideoExpanded ? "is-local-video-expanded" : ""}`}
+              className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""} ${callMinimized ? "is-minimized" : ""} ${localVideoExpanded ? "is-local-video-expanded" : ""} ${controlsHidden ? "is-controls-hidden" : ""}`}
+              onClick={(event) => {
+                if (event.target.closest("button,input,select,label,a,[role=button],[role=menuitem]")) return;
+                setControlsHidden((h) => !h);
+                setAudioMenuOpen(false);
+              }}
               role={callMinimized ? "region" : "dialog"}
               aria-modal={!callMinimized}
               aria-label={callMinimized ? "Call in progress" : "Call"}
@@ -1496,21 +1566,19 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                         </div>
                       )}
                     </div>
-                    {call.isVideo && (
-                      <div className="call-action">
-                        <button type="button" className={`call-round ${cameraOff ? "is-on" : ""}`} aria-pressed={cameraOff} onClick={() => toggleTrack("video")} aria-label={cameraOff ? "Turn camera on" : "Turn camera off"}>
-                          {cameraOff ? <FiVideoOff /> : <FiVideo />}
+                    <div className="call-action">
+                        <button type="button" className={`call-round ${call.isVideo && !cameraOff ? "" : "is-on"}`} aria-pressed={!call.isVideo || cameraOff} onClick={() => toggleTrack("video")} aria-label={call.isVideo && !cameraOff ? "Turn camera off" : "Turn camera on"}>
+                          {call.isVideo && !cameraOff ? <FiVideo /> : <FiVideoOff />}
                         </button>
                         <span>Camera</span>
                       </div>
-                    )}
                     <div className="call-action">
                       <button type="button" className={`call-round ${muted ? "is-on" : ""}`} aria-pressed={muted} onClick={() => toggleTrack("audio")} aria-label={muted ? "Unmute" : "Mute"}>
                         {muted ? <FiMicOff /> : <FiMic />}
                       </button>
                       <span>{muted ? "Unmute" : "Mute"}</span>
                     </div>
-                    {call.isVideo && (
+                    {call.isVideo && !cameraOff && (
                       <div className="call-action">
                         <button type="button" className="call-round" onClick={flipCamera} aria-label="Switch camera">
                           <FiRefreshCw />

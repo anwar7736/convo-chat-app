@@ -815,6 +815,8 @@ const Home = () => {
       });
 
       setMessages(filterMessages);
+      // let the call screen react to live profile changes
+      window.dispatchEvent(new CustomEvent("chat:user-updated", { detail: data }));
       if (data?._id !== authUser?._id) {
         toast.success(data?.message);
       }

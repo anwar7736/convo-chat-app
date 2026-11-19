@@ -2697,9 +2697,12 @@ body:has(.call-screen) {
   pointer-events: none;
   transition: opacity 0.25s ease;
 }
-.call-screen.is-controls-hidden .call-hero {
+.call-screen.is-controls-hidden .call-hero > :not(.call-avatar) {
   opacity: 0;
   pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.call-screen .call-hero > * {
   transition: opacity 0.25s ease;
 }
 .call-screen .call-actions,

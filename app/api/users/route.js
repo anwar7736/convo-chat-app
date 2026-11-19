@@ -26,6 +26,11 @@ export async function GET(request) {
         ? Object.fromEntries(currentUser.nicknames)
         : currentUser?.nicknames || {};
     const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nicknameMatchIds = search
+        ? Object.entries(nicknames)
+            .filter(([id, nick]) => mongoose.isValidObjectId(id) && String(nick || '').toLowerCase().includes(search.toLowerCase()))
+            .map(([id]) => new mongoose.Types.ObjectId(id))
+        : [];
     let data = await userSchema.aggregate([
         // User Query
         {
@@ -34,6 +39,7 @@ export async function GET(request) {
                     { name: { $regex: new RegExp(escapedSearch, 'i') } },
                     { email: { $regex: new RegExp(escapedSearch, 'i') } },
                     { phone: { $regex: new RegExp(escapedSearch, 'i') } },
+                    ...(nicknameMatchIds.length ? [{ _id: { $in: nicknameMatchIds } }] : []),
                 ],
                 ...(search ? {} : { _id: { $ne: authObjectId } }),
             }

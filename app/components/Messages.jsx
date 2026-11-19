@@ -959,14 +959,18 @@ const Messages = () => {
               )}
               <div className={`flex items-end gap-2 ${mine ? "justify-end" : ""} ${reactions.length ? "pb-4" : ""}`}>
                 {!mine && (
-                  <img
-                    src={getImageURL(sender?.photo)}
-                    alt=""
-                    className="h-8 w-8 shrink-0 rounded-full border border-[#394761] object-cover"
-                    title={conversationUser?.is_group === 1
-                      ? sender?.name
-                      : conversationUser?.nickname || sender?.name}
-                  />
+                  <button
+                    type="button"
+                    className="h-8 w-8 shrink-0 rounded-full border border-[#394761] p-0 overflow-hidden"
+                    title={conversationUser?.is_group === 1 ? sender?.name : conversationUser?.nickname || sender?.name}
+                    onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent("chat:open-profile", { detail: { userId: sender?._id } })); }}
+                  >
+                    <img
+                      src={getImageURL(sender?.photo)}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  </button>
                 )}
                 <div className="message-action-anchor">
                   {dx > 0 && (
@@ -1003,9 +1007,18 @@ const Messages = () => {
                       </button>
                     )}
                     {data?.message?.reply_to && (
-                      <p className="mb-2 max-w-full truncate rounded-md border-l-2 border-white/50 bg-black/10 px-2 py-1 text-xs opacity-90">
+                      <button
+                        type="button"
+                        className="mb-2 max-w-full truncate rounded-md border-l-2 border-white/50 bg-black/10 px-2 py-1 text-xs opacity-90 text-left w-full"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const el = repliedTo?._id && document.getElementById(`message-${repliedTo._id}`);
+                          if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.add("is-highlighted"); setTimeout(() => el.classList.remove("is-highlighted"), 1500); }
+                        }}
+                        title="Go to message"
+                      >
                         ↪ {repliedTo?.sender?._id === user?._id ? "You" : repliedTo?.sender?.name || "Message"}: {repliedTo?.message?.message || repliedTo?.message?.attachmentName || "Reply"}
-                      </p>
+                      </button>
                     )}
                     {data?.message?.deletedForEveryone ? (
                       <p className="italic opacity-75">This message was deleted.</p>

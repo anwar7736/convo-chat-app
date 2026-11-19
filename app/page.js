@@ -562,15 +562,19 @@ const Home = () => {
       }
       socket.emit("private-message", JSON.stringify(res.data));
       // the socket server does not echo an event back to the tab that sent it: load the saved copy
-      if (String(selectedConversationRef.current?._id) === String(conversation?._id)) {
-        const timeline = await loadConversationTimeline(conversation);
-        if (String(selectedConversationRef.current?._id) === String(conversation?._id)) {
-          setMessages(timeline.messages);
-          setCallLogs(timeline.callLogs);
-        }
-      }
-      removePending(localId);
-      getUserList({ showLoading: false });
+      // the queue is released right away so the next message does not wait for this reload
+      const reload = String(selectedConversationRef.current?._id) === String(conversation?._id)
+        ? loadConversationTimeline(conversation).then((timeline) => {
+            if (String(selectedConversationRef.current?._id) === String(conversation?._id)) {
+              setMessages(timeline.messages);
+              setCallLogs(timeline.callLogs);
+            }
+          }).catch(() => {})
+        : Promise.resolve();
+      reload.finally(() => {
+        removePending(localId);
+        getUserList({ showLoading: false });
+      });
     } catch (error) {
       markFailed("Check your connection");
     }
@@ -1034,6 +1038,22 @@ const Home = () => {
     setAttachment(file);
   };
 
+  // open profile modal for any user (from message avatar click)
+  useEffect(() => {
+    const onOpenProfile = async (event) => {
+      const userId = event.detail?.userId;
+      if (!userId) return;
+      const res = await fetch('/api/user/profile/' + userId).then(r=>r.json()).catch(()=>({}));
+      if (res.success) {
+        res.data.is_group = 0;
+        setData(res.data);
+        setModalOpen(true);
+      }
+    };
+    window.addEventListener('chat:open-profile', onOpenProfile);
+    return () => window.removeEventListener('chat:open-profile', onOpenProfile);
+  }, []);
+
   const handleEditOrViewModal = async () => {
     if (user.is_group === 1) {
       let res = await fetch(`/api/group?id=${user?._id}`);
@@ -1169,8 +1189,21 @@ const Home = () => {
                       type="file"
                       accept="image/*,audio/*,video/mp4,video/webm,application/pdf"
                       className="hidden"
-                      onChange={(event) => {
-                        chooseAttachment(event.target.files?.[0]);
+                      multiple
+                    onChange={(event) => {
+                        const files = Array.from(event.target.files || []);
+                        if (files.length === 1) { chooseAttachment(files[0]); } else {
+                          // multiple files: queue each as an individual message without touching the composer
+                          files.forEach((file) => {
+                            const localId = `local-${crypto.randomUUID()}`;
+                            const previewUrl = URL.createObjectURL(file);
+                            const fileType = (file.type || "").toLowerCase();
+                            const isGroup = Number(user?.is_group) === 1;
+                            pendingInputsRef.current.set(localId, { conversation: user, text: "", file, previewUrl, durationSeconds: 0, replyTo: null });
+                            setPendingMessages((list) => [...list, { _id: localId, message_id: localId, localState: "sending", conversationId: String(user._id), status: 1, sender: { _id: authUser?._id, name: authUser?.name, photo: authUser?.photo }, receiver: { _id: user._id }, ...(isGroup ? { group: { _id: user._id, name: user.name } } : {}), message: { message: "", type: fileType.startsWith("image/") ? "image" : fileType.startsWith("audio/") ? "audio" : fileType.startsWith("video/") ? "video" : "file", attachmentUrl: previewUrl, attachmentName: file.name, mimeType: file.type, createdAt: new Date().toISOString(), reactions: [] } }]);
+                            sendQueueRef.current = sendQueueRef.current.then(() => deliverPending(localId));
+                          });
+                        }
                         event.target.value = "";
                       }}
                     />

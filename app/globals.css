@@ -2683,11 +2683,15 @@ button.nickname-person:hover {
   cursor: grabbing;
 }
 
+/* disable pull-to-refresh when a call is running (call-screen is in the DOM) */
+body:has(.call-screen) {
+  overscroll-behavior: none;
+}
+
 /* WhatsApp-style tap to hide/show call controls */
 .call-screen.is-controls-hidden .call-actions,
 .call-screen.is-controls-hidden .call-minimize-button,
 .call-screen.is-controls-hidden .call-muted-pill,
-.call-screen.is-controls-hidden .call-sub,
 .call-screen.is-controls-hidden .call-debug {
   opacity: 0;
   pointer-events: none;
@@ -2695,6 +2699,7 @@ button.nickname-person:hover {
 }
 .call-screen.is-controls-hidden .call-hero {
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.25s ease;
 }
 .call-screen .call-actions,
@@ -2702,4 +2707,11 @@ button.nickname-person:hover {
 .call-screen .call-muted-pill,
 .call-screen .call-hero {
   transition: opacity 0.25s ease;
+}
+
+/* reply parent flash */
+.message-row.is-highlighted .message-bubble {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+  transition: outline 0s;
 }

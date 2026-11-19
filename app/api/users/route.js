@@ -30,8 +30,12 @@ export async function GET(request) {
         // User Query
         {
             $match: {
-                name: { $regex: new RegExp(escapedSearch, 'i') },
-                _id: { $ne: authObjectId },
+                $or: [
+                    { name: { $regex: new RegExp(escapedSearch, 'i') } },
+                    { email: { $regex: new RegExp(escapedSearch, 'i') } },
+                    { phone: { $regex: new RegExp(escapedSearch, 'i') } },
+                ],
+                ...(search ? {} : { _id: { $ne: authObjectId } }),
             }
         },
         {
@@ -358,6 +362,7 @@ export async function GET(request) {
             );
             return {
                 ...item,
+                ...(Number(item.is_group) === 0 && conversationId === String(userId) ? { name: `${item.name} (You)`, is_self: true } : {}),
                 last_activity: callIsLatest
                     ? latestCall.startedAt
                     : latest?.createdAt || directActivity.get(conversationId) || item.last_activity,

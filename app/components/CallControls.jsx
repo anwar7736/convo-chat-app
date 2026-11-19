@@ -407,6 +407,14 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       return;
     }
 
+    // the microphone follows the chosen route: a Bluetooth headset mic for Bluetooth, the phone's own mic otherwise
+    const inputs = audioDevices.filter((item) => item.kind === "audioinput");
+    const btInput = inputs.find((item) => /bluetooth|headset|headphone/i.test(item.label || ""));
+    const wantedInput = route === "bluetooth" ? btInput?.deviceId : (inputs.find((item) => !/bluetooth|headset|headphone/i.test(item.label || "")) || {}).deviceId;
+    if ((wantedInput || "") !== audioInputId && (route !== "bluetooth" || btInput)) {
+      await changeAudioInput(wantedInput || "");
+    }
+
     setAudioRoute(route);
     setAudioMenuOpen(false);
   };
@@ -1263,6 +1271,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   }, [callScreenOpen]);
   // the small "call in progress" bar can be dragged anywhere on screen (a tap still presses its buttons)
   const [miniOffset, setMiniOffset] = useState({ x: 0, y: 0 });
+  const [selfViewOffset, setSelfViewOffset] = useState({ x: 0, y: 0 });
+  const selfViewDragRef = useRef(null);
+  const suppressSelfViewClickRef = useRef(false);
   const miniDragRef = useRef(null);
   const suppressMiniClickRef = useRef(false);
   const onMiniPointerDown = (event) => {
@@ -1309,8 +1320,41 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     };
   }, [callMinimized]);
   useEffect(() => {
-    if (!call) setMiniOffset({ x: 0, y: 0 });
+    if (!call) { setMiniOffset({ x: 0, y: 0 }); setSelfViewOffset({ x: 0, y: 0 }); }
   }, [call]);
+
+  // self-view small card is draggable (same as mini bar)
+  useEffect(() => {
+    if (!call?.isVideo || callMinimized) return;
+    const onMove = (event) => {
+      const drag = selfViewDragRef.current;
+      if (!drag) return;
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(dx, dy) < 6) return;
+      drag.moved = true;
+      event.preventDefault();
+      const margin = 8;
+      const clampedX = Math.min(window.innerWidth - drag.rect.right - margin, Math.max(margin - drag.rect.left, drag.base.x + dx));
+      const clampedY = Math.min(window.innerHeight - drag.rect.bottom - margin, Math.max(margin - drag.rect.top, drag.base.y + dy));
+      setSelfViewOffset({ x: clampedX, y: clampedY });
+    };
+    const onUp = () => {
+      if (selfViewDragRef.current?.moved) suppressSelfViewClickRef.current = true;
+      selfViewDragRef.current = null;
+    };
+    const onResize = () => setSelfViewOffset({ x: 0, y: 0 });
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [call?.isVideo, callMinimized]);
 
   const minimizeCallScreen = () => {
     setAudioMenuOpen(false);
@@ -1401,7 +1445,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
               data-call-screen-open={callMinimized ? undefined : "true"}
               className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""} ${callMinimized ? "is-minimized" : ""} ${localVideoExpanded ? "is-local-video-expanded" : ""} ${controlsHidden ? "is-controls-hidden" : ""}`}
               onClick={(event) => {
-                if (event.target.closest("button,input,select,label,a,[role=button],[role=menuitem]")) return;
+                if (callMinimized || event.target.closest("button,input,select,label,a,[role=button],[role=menuitem]")) return;
                 setControlsHidden((h) => !h);
                 setAudioMenuOpen(false);
               }}
@@ -1441,7 +1485,18 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                   id="local-call-stream"
                   ref={localVideoRef}
                   className={`call-self-view ${facingMode === "user" ? "is-mirrored" : ""} ${cameraOff ? "is-off" : ""} ${localVideoExpanded ? "is-expanded" : ""}`}
-                  {...swapProps(!localVideoExpanded, "Show your video full screen")}
+                  style={!localVideoExpanded ? { translate: `${selfViewOffset.x}px ${selfViewOffset.y}px` } : undefined}
+                  onPointerDown={(event) => {
+                    if (localVideoExpanded) return;
+                    selfViewDragRef.current = { startX: event.clientX, startY: event.clientY, base: selfViewOffset, rect: event.currentTarget.getBoundingClientRect(), moved: false };
+                  }}
+                  onClickCapture={(event) => {
+                    if (!suppressSelfViewClickRef.current) return;
+                    suppressSelfViewClickRef.current = false;
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  {...(localVideoExpanded ? swapProps(!localVideoExpanded, "Show your video full screen") : { title: "Drag to move · tap to swap" })}
                   autoPlay
                   playsInline
                   muted
@@ -1552,17 +1607,6 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                               {audioRoute === id && <FiCheck className="call-audio-check" />}
                             </button>
                           ))}
-                          {audioDevices.some((device) => device.kind === "audioinput") && (
-                            <label className="call-microphone-picker">
-                              <span><FiMic /> Microphone</span>
-                              <select value={audioInputId} onChange={(event) => changeAudioInput(event.target.value)}>
-                                <option value="">Default</option>
-                                {audioDevices.filter((device) => device.kind === "audioinput").map((device, index) => (
-                                  <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>
-                                ))}
-                              </select>
-                            </label>
-                          )}
                         </div>
                       )}
                     </div>

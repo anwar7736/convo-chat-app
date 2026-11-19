@@ -46,8 +46,7 @@ const Sidebar = ({
       // and this tab leaves for sure, so nobody keeps seeing it online until a reload
       activeSocket?.disconnect();
       clearAuthProfile();
-      setUser("");
-      router.push("/auth");
+      window.location.replace("/auth");
     } catch (error) {
       toast.error(error.message || "Unable to sign out.");
     }

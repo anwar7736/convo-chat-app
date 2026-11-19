@@ -9,7 +9,7 @@ import { userSchema } from "@/app/models/userModel";
 import { sendPushNotification } from "@/app/lib/pushNotifications";
 import { createHmac } from "crypto";
 import mongoose from "mongoose";
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { callLogConversationMatch, viewCallLog } from "@/app/lib/callLogs";
 import { getUnreadNotificationCounts } from "@/app/lib/unreadNotificationCounts";
 
@@ -285,7 +285,7 @@ export async function POST(request) {
       return NextResponse.json({ success: false, message: "The message you are replying to is unavailable." }, { status: 400 });
     }
   } else if (senderId.equals(receiverId)) {
-    return NextResponse.json({ success: false, message: "Recipient not found." }, { status: 404 });
+    // a note to yourself, like WhatsApp: nothing to block-check
   } else {
     const [senderProfile, receiverProfile] = await Promise.all([
       userSchema.findById(senderId).select("blockedUsers").lean(),
@@ -347,11 +347,13 @@ export async function POST(request) {
       message_id: message._id,
       sender_id: senderId,
       receiver_id: receiverId,
+      ...(senderId.equals(receiverId) ? { status: 1 } : {}),
     });
   }
 
   // Notification like WhatsApp: "<sender>" (or "<sender> @ <group>") with the text; tapping it opens that chat.
   // For a direct message the chat to open on the receiver's phone is the SENDER's (receiver_id is the receiver).
+  after(async () => {
   const candidatePushRecipients = (isGroup ? recipientIds : [receiver_id]).filter((id) => id !== sessionUserId);
   const mutedUsers = candidatePushRecipients.length
     ? await userSchema.find({
@@ -376,6 +378,7 @@ export async function POST(request) {
     tag: `message-${ticketId}`,
     badge: unreadByUser.get(recipientId) || 0,
   })).catch((error) => console.error("Unable to prepare a Web Push notification:", error));
+  });
 
   return NextResponse.json({
     success: true,

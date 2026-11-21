@@ -1732,7 +1732,7 @@ form:has(> .print-container),
 }
 
 .call-self-view.is-off {
-  opacity: .25;
+  opacity: 1;
 }
 
 /* ================= SweetAlert (confirm dialogs) ================= */
@@ -2737,4 +2737,10 @@ body:has(.call-screen) {
 body:has(.call-screen.is-minimized) .chat-shell {
   top: calc(var(--chat-viewport-top, 0px) + 46px);
   height: calc(var(--chat-viewport-height, 100dvh) - 46px);
+}
+
+/* full-screen video call (one partner): the picture is all that shows, without the partner's name */
+.call-screen.has-video:not(:has(.call-stage.is-grid)) .call-hero .call-name,
+.call-stage:not(.is-grid) .call-tile > span:not(.call-tile-muted) {
+  display: none;
 }

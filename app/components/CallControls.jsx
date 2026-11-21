@@ -1271,9 +1271,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     const element = localVideoRef.current;
     const stream = localStreamRef.current;
     if (!call?.isVideo || !element || !stream) return;
-    element.srcObject = stream;
+    element.srcObject = cameraOff ? null : stream;
     const resumePlayback = () => {
-      if (callMinimized || document.visibilityState === "hidden") return;
+      if (cameraOff || callMinimized || document.visibilityState === "hidden") return;
       element.play().catch((error) => {
         if (error?.name !== "NotAllowedError") console.error("Unable to resume local call video:", error);
       });
@@ -1285,7 +1285,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       document.removeEventListener("visibilitychange", resumePlayback);
       window.removeEventListener("pageshow", resumePlayback);
     };
-  }, [call, callMinimized, facingMode]);
+  }, [call, callMinimized, facingMode, cameraOff]);
 
   // the conversation list shows "In call" next to this person/group while the call runs
   useEffect(() => {
@@ -1510,8 +1510,12 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                 <video
                   id="local-call-stream"
                   ref={localVideoRef}
-                  className={`call-self-view ${facingMode === "user" ? "is-mirrored" : ""} ${cameraOff ? "is-off" : ""} ${localVideoExpanded ? "is-expanded" : ""}`}
-                  style={!localVideoExpanded ? { translate: `${selfViewOffset.x}px ${selfViewOffset.y}px` } : undefined}
+                  className={`call-self-view ${facingMode === "user" && !cameraOff ? "is-mirrored" : ""} ${cameraOff ? "is-off" : ""} ${localVideoExpanded ? "is-expanded" : ""}`}
+                  style={{
+                    ...(!localVideoExpanded ? { translate: `${selfViewOffset.x}px ${selfViewOffset.y}px` } : {}),
+                    // camera off: the card shows your profile picture instead of a black frame
+                    ...(cameraOff ? { background: `#111827 url(${getImageURL(currentUser?.photo)}) center / ${localVideoExpanded ? "contain" : "cover"} no-repeat` } : {}),
+                  }}
                   onPointerDown={(event) => {
                     if (localVideoExpanded) return;
                     selfViewDragRef.current = { startX: event.clientX, startY: event.clientY, base: selfViewOffset, rect: event.currentTarget.getBoundingClientRect(), moved: false };

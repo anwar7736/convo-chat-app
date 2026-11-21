@@ -881,11 +881,11 @@ const Messages = () => {
             const isActive = !data.endedAt && ["ringing", "answered"].includes(data.status);
             const mediaName = data.isVideo ? "Video" : "Voice";
             let callStatus;
-            if (isActive && data.status === "answered") callStatus = "In call · Tap to return";
+            if (isActive && data.status === "answered") callStatus = "In Call · Tap to Return";
             else if (isActive) callStatus = outgoing ? "Calling" : "Ringing";
-            else if (data.status === "no-answer") callStatus = outgoing ? "No answer" : "Tap to call back";
+            else if (data.status === "no-answer") callStatus = outgoing ? "No Answer" : "Tap to Call Back";
             else if (data.status === "declined") callStatus = "Declined";
-            else if (data.status === "ended" && !data.answeredAt) callStatus = outgoing ? "Cancelled" : "Call ended";
+            else if (data.status === "ended" && !data.answeredAt) callStatus = outgoing ? "Cancelled" : "Call Ended";
             else {
               const duration = Math.max(0, Number(data.durationSeconds) || 0);
               const minutes = Math.floor(duration / 60);
@@ -916,7 +916,7 @@ const Messages = () => {
                   >
                     <span className="call-log-icon"><CallIcon /></span>
                     <span className="call-log-copy">
-                      <strong>{isMissed ? `Missed ${mediaName} Call` : `${mediaName} call`}</strong>
+                      <strong>{isMissed ? `Missed ${mediaName} Call` : `${mediaName} Call`}</strong>
                       <span>{callStatus}</span>
                     </span>
                     <time dateTime={validCallTime ? callStartedAt.toISOString() : undefined}>

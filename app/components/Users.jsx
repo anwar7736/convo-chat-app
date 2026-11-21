@@ -205,7 +205,7 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
             contact?.last_call_status === "no-answer" &&
             String(contact?.last_call_caller_id) !== String(authUser?._id);
           const mine = !isCallPreview && contact?.last_message_sender_id === authUser?._id;
-          const callType = contact?.last_call_is_video ? "Video call" : "Voice call";
+          const callType = contact?.last_call_is_video ? "Video Call" : "Voice Call";
           const callLabel = isMissedCall
             ? `Missed ${callType.replace(" call", " Call")}`
             : contact?.last_call_status === "no-answer"
@@ -242,9 +242,9 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                   : FiPhoneIncoming
             : mediaPreview?.Icon;
           const preview = isTyping
-            ? (typingName ? typingName + " is typing…" : "typing…")
+            ? (typingName ? typingName + " is Typing…" : "Typing…")
             : inCall
-            ? (liveCall.isVideo ? "Video call" : "Voice call")
+            ? (liveCall.isVideo ? "Video Call" : "Voice Call")
             : isCallPreview
             ? callLabel
             : mediaPreview?.text || contact?.last_message || "";
@@ -299,7 +299,7 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                       <span className="truncate">{preview}</span>
                       {!isTyping && inCall && (
                         <span className="shrink-0 font-semibold text-emerald-400">
-                          {liveCall.phase === "connected" ? "In call" : liveCall.phase === "ringing" ? "Ringing…" : "Calling…"}
+                          {liveCall.phase === "connected" ? "In Call" : liveCall.phase === "ringing" ? "Ringing…" : "Calling…"}
                         </span>
                       )}
                     </p>

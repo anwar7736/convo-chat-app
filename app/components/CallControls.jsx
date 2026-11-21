@@ -10,7 +10,7 @@ import { UserListContext } from "../contexts/UserListContext";
 import { getImageURL, socket_connection } from "../helpers/helper";
 
 const socket = socket_connection();
-const END_SCREEN_MS = 1800; // how long "Line busy", "Call ended 01:23" … stay on screen
+const END_SCREEN_MS = 1800; // how long "Line Busy", "Call ended 01:23" … stay on screen
 
 const formatTime = (seconds) =>
   `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
@@ -85,6 +85,8 @@ function marimbaRing() {
   return makeMarimbaUrl(notes, phrase.length * 2 * step + 1.05);
 }
 
+const RINGTONE_FILE = "/sounds/ringtone.mp3";
+
 let tones = null;
 function getTones() {
   if (!tones && typeof window !== "undefined") {
@@ -103,17 +105,17 @@ function getTones() {
 function useTone(kind, playing, loop = true) {
   useEffect(() => {
     if (!playing || !kind) return;
-    const audio = new Audio(getTones()[kind]);
+    // the incoming ringtone is the file in public/sounds; if it cannot load, the generated marimba plays instead
+    const audio = new Audio(kind === "ring" ? RINGTONE_FILE : getTones()[kind]);
     audio.loop = loop;
-    let plays = 0;
-    const playTwice = () => {
-      plays += 1;
-      if (kind === "ring" && plays < 2) audio.play().catch(() => {});
+    const fallBack = () => {
+      audio.src = getTones().ring;
+      audio.play().catch(() => {});
     };
-    if (kind === "ring") audio.addEventListener("ended", playTwice);
+    if (kind === "ring") audio.addEventListener("error", fallBack, { once: true });
     audio.play().catch(() => {}); // browsers may refuse sound before the first tap; vibration/notification still work
     return () => {
-      audio.removeEventListener("ended", playTwice);
+      audio.removeEventListener("error", fallBack);
       audio.pause();
       audio.src = "";
     };
@@ -875,7 +877,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     const connectedFor = active.connectedAt ? Math.floor((Date.now() - active.connectedAt) / 1000) : null;
     stopCall();
     loadCallHistory();
-    showEnded(connectedFor != null ? "Call ended" : "Call cancelled", connectedFor != null ? formatTime(connectedFor) : "", {
+    showEnded(connectedFor != null ? "Call Ended" : "Call cancelled", connectedFor != null ? formatTime(connectedFor) : "", {
       name: active.isGroup || active.isCaller ? active.conversationName : active.callerName,
       photo: active.photo,
     });
@@ -904,7 +906,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     if (!("serviceWorker" in navigator) || typeof Notification === "undefined" || Notification.permission !== "granted") return;
     const tag = `incoming-${incoming.callId}`;
     navigator.serviceWorker.ready.then((registration) => registration.showNotification(
-      `Incoming ${incoming.isVideo ? "video" : "voice"} call`,
+      `Incoming ${incoming.isVideo ? "Video" : "Voice"} Call`,
       {
         body: incoming.conversationName && incoming.conversationName !== incoming.callerName
           ? `${incoming.callerName} @ ${incoming.conversationName}`
@@ -950,7 +952,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           ? formatTime(Math.floor((Date.now() - activeCall.connectedAt) / 1000))
           : activeCall.status === "ringing" ? "Ringing" : activeCall.status === "connecting" ? "Connecting" : "Calling";
         await registration.showNotification(name || "Call in progress", {
-          body: `${activeCall.isVideo ? "Video" : "Voice"} call · ${status}`,
+          body: `${activeCall.isVideo ? "Video" : "Voice"} Call · ${status}`,
           icon: "/icons/icon.svg",
           badge: "/icons/icon.svg",
           silent: true,
@@ -1149,9 +1151,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         }
         loadCallHistory();
         stopCall(false);
-        if (reason === "no-answer") showEnded("No answer", "", endInfo(active), true);
-        else if (reason === "declined") showEnded("Call declined", "", endInfo(active), true);
-        else showEnded("Call ended", connectedFor != null ? formatTime(connectedFor) : "", endInfo(active));
+        if (reason === "no-answer") showEnded("No Answer", "", endInfo(active), true);
+        else if (reason === "declined") showEnded("Call Declined", "", endInfo(active), true);
+        else showEnded("Call Ended", connectedFor != null ? formatTime(connectedFor) : "", endInfo(active));
       }
       const missedIncoming = incomingRef.current;
       if (missedIncoming?.callId === callId) {
@@ -1162,7 +1164,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         if (reason !== "answered-elsewhere" && reason !== "declined-elsewhere") {
           const missedCallerName = personFor(missedIncoming.callerId)?.nickname || missedIncoming.callerName || "someone";
           toast.info(`Missed call from ${missedCallerName}.`);
-          showEnded("Missed call", "", {
+          showEnded("Missed Call", "", {
             name: missedCallerName,
             photo: personFor(missedIncoming.callerId)?.photo,
           }, true);
@@ -1214,7 +1216,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       loadCallHistory();
       stopCall(false);
       if (reason === "busy") {
-        showEnded("Line busy", active.isGroup ? "Everyone is on another call" : "On another call", endInfo(active), true);
+        showEnded("Line Busy", active.isGroup ? "Everyone is on another call" : "On another call", endInfo(active), true);
       } else {
         void update.then((saved) => saved && notifyMissed(active, active.recipients));
         showEnded(active.isGroup ? "Nobody is available" : "Unavailable", "They are offline. We let them know you called.", endInfo(active), true);
@@ -1416,7 +1418,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         <button
           type="button"
           className="rounded-xl p-3 text-indigo-300 hover:bg-[#263248] disabled:opacity-40"
-          title={socketConnected ? "Voice call" : "Connecting…"}
+          title={socketConnected ? "Voice Call" : "Connecting…"}
           aria-label="Start voice call"
           disabled={busy || Boolean(call || incoming) || blocked}
           onClick={() => startCall(false)}
@@ -1428,7 +1430,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         <button
           type="button"
           className="rounded-xl p-3 text-indigo-300 hover:bg-[#263248] disabled:opacity-40"
-          title={socketConnected ? "Video call" : "Connecting…"}
+          title={socketConnected ? "Video Call" : "Connecting…"}
           aria-label="Start video call"
           disabled={busy || Boolean(call || incoming) || blocked}
           onClick={() => startCall(true)}
@@ -1442,7 +1444,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           {incoming && (
             <div className="call-screen call-overlay" role="dialog" aria-modal="true" aria-label="Incoming call">
               <div className="call-hero">
-                <p className="call-kind">{incoming.isVideo ? "Incoming video call" : "Incoming voice call"}</p>
+                <p className="call-kind">{incoming.isVideo ? "Incoming Video Call" : "Incoming Voice Call"}</p>
                 <div className="call-avatar is-ringing">
                   <img src={getImageURL(incomingPerson?.photo)} alt="" />
                 </div>
@@ -1566,7 +1568,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                   </button>
 
                   <div className={`call-hero ${showVideoStage ? "is-compact" : ""}`}>
-                    <p className="call-kind">{call.isVideo ? "Video call" : "Voice call"}{call.isGroup ? ` · ${remoteEntries.length + 1} in call` : ""}</p>
+                    <p className="call-kind">{call.isVideo ? "Video Call" : "Voice Call"}{call.isGroup ? ` · ${remoteEntries.length + 1} in call` : ""}</p>
                     {!showVideoStage && (
                       <div className={`call-avatar ${call.connectedAt ? "" : "is-ringing"}`}>
                         <img src={getImageURL(call.photo)} alt="" />

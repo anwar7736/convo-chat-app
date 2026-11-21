@@ -93,7 +93,7 @@ export const activityFormat = (date, now = Date.now()) => {
   return years === 1 ? "Active a year ago" : `Active ${years} years ago`;
 };
 
-export const playMessageReminder = () => {
+const playGeneratedReminder = () => {
   if (typeof window === "undefined") return;
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (!AudioContext) return;
@@ -104,20 +104,27 @@ export const playMessageReminder = () => {
       const gain = context.createGain();
       gain.gain.setValueAtTime(0.0001, context.currentTime);
       gain.connect(context.destination);
-      const notes = [{ frequency: 880, start: 0 }, { frequency: 660, start: 0.14 }];
+      // a bright two-note "ding-dong" like a chat app: a bell-like tone (fundamental + overtones) that rings out
+      const notes = [{ frequency: 988, start: 0 }, { frequency: 1319, start: 0.17 }];
+      const partials = [{ ratio: 1, level: 1 }, { ratio: 2, level: 0.35 }, { ratio: 3, level: 0.12 }];
       for (const note of notes) {
-        const oscillator = context.createOscillator();
-        oscillator.type = "sine";
-        oscillator.frequency.value = note.frequency;
-        oscillator.connect(gain);
         const start = context.currentTime + note.start;
-        gain.gain.setValueAtTime(0.0001, start);
-        gain.gain.exponentialRampToValueAtTime(0.12, start + 0.025);
-        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.12);
-        oscillator.start(start);
-        oscillator.stop(start + 0.13);
+        for (const { ratio, level } of partials) {
+          const oscillator = context.createOscillator();
+          const partialGain = context.createGain();
+          oscillator.type = "sine";
+          oscillator.frequency.value = note.frequency * ratio;
+          oscillator.connect(partialGain);
+          partialGain.connect(gain);
+          partialGain.gain.setValueAtTime(0.0001, start);
+          partialGain.gain.exponentialRampToValueAtTime(0.5 * level, start + 0.012);
+          partialGain.gain.exponentialRampToValueAtTime(0.0001, start + 0.5);
+          oscillator.start(start);
+          oscillator.stop(start + 0.52);
+        }
       }
-      window.setTimeout(() => context.close().catch(() => {}), 400);
+      gain.gain.setValueAtTime(1, context.currentTime);
+      window.setTimeout(() => context.close().catch(() => {}), 900);
     };
     if (context.state === "suspended") {
       context.resume().then(play).catch((error) => {
@@ -197,3 +204,19 @@ export const loadConversationTimeline = async (data) => {
 
 export const loadMessages = async (data) =>
   (await loadConversationTimeline(data)).messages;
+
+// The tune is the file public/sounds/message.mp3: replace that file to change the sound.
+// When it cannot be loaded or played, the generated tune above plays instead.
+export const playMessageReminder = () => {
+  if (typeof window === "undefined") return;
+  try {
+    const audio = new Audio("/sounds/message.mp3");
+    audio.volume = 1;
+    audio.addEventListener("error", playGeneratedReminder, { once: true });
+    audio.play().catch((error) => {
+      if (error?.name !== "NotAllowedError") playGeneratedReminder();
+    });
+  } catch {
+    playGeneratedReminder();
+  }
+};

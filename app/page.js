@@ -1121,7 +1121,7 @@ const Home = () => {
                   <span className="block text-xs text-[#91a0b7]">
                     {user?.is_group === 1
                       ? typingUsers.length
-                        ? `${typingUsers.slice(0, 2).map((person) => person.name).join(", ")}${typingUsers.length > 2 ? ` +${typingUsers.length - 2}` : ""} typing…`
+                        ? `${typingUsers.slice(0, 2).map((person) => person.name).join(", ")}${typingUsers.length > 2 ? ` +${typingUsers.length - 2}` : ""} Typing…`
                         : `${user?.total_members || 0} members`
                       : typingUsers.length
                         ? "Typing…"

@@ -71,7 +71,7 @@ export async function POST(request) {
   const ticketId = isGroup ? conversationId : userId;
   const unreadByUser = await getUnreadNotificationCounts(recipients);
   await sendPushNotification(recipients, (recipientId) => ({
-    title: `Missed ${isVideo ? "video" : "voice"} call`,
+    title: `Missed ${isVideo ? "Video" : "Voice"} Call`,
     body: groupName ? `${caller?.name || "Someone"} @ ${groupName}` : caller?.name || "Someone called you",
     url: `/?ticket=${ticketId}&is_group=${isGroup ? "1" : "0"}`,
     tag: `call-${ticketId}`,

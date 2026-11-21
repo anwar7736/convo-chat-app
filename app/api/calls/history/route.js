@@ -201,7 +201,7 @@ export async function POST(request) {
         const caller = await userSchema.findById(userId).select("name").lean();
         const ticketId = isGroup ? conversationId : userId;
         await sendPushNotification(recipients, () => ({
-          title: `Incoming ${body.isVideo ? "video" : "voice"} call`,
+          title: `Incoming ${body.isVideo ? "Video" : "Voice"} Call`,
           body: caller?.name || "Someone is calling you",
           url: `/?ticket=${ticketId}&is_group=${isGroup ? "1" : "0"}`,
           tag: `incoming-${callId}`,

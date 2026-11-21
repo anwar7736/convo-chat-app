@@ -86,6 +86,8 @@ function marimbaRing() {
 }
 
 const RINGTONE_FILE = "/sounds/ringtone.mp3";
+// how many times the incoming ringtone plays before it stops (the call keeps ringing silently); set NEXT_PUBLIC_RINGTONE_PLAYS
+const RINGTONE_PLAYS = Math.max(1, Math.floor(Number(process.env.NEXT_PUBLIC_RINGTONE_PLAYS)) || 5);
 
 let tones = null;
 function getTones() {
@@ -107,7 +109,15 @@ function useTone(kind, playing, loop = true) {
     if (!playing || !kind) return;
     // the incoming ringtone is the file in public/sounds; if it cannot load, the generated marimba plays instead
     const audio = new Audio(kind === "ring" ? RINGTONE_FILE : getTones()[kind]);
-    audio.loop = loop;
+    const limited = kind === "ring";
+    audio.loop = limited ? false : loop;
+    let plays = 1;
+    const playAgain = () => {
+      if (plays >= RINGTONE_PLAYS) return;
+      plays += 1;
+      audio.play().catch(() => {});
+    };
+    if (limited) audio.addEventListener("ended", playAgain);
     const fallBack = () => {
       audio.src = getTones().ring;
       audio.play().catch(() => {});
@@ -116,6 +126,7 @@ function useTone(kind, playing, loop = true) {
     audio.play().catch(() => {}); // browsers may refuse sound before the first tap; vibration/notification still work
     return () => {
       audio.removeEventListener("error", fallBack);
+      audio.removeEventListener("ended", playAgain);
       audio.pause();
       audio.src = "";
     };
@@ -886,7 +897,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   /* ---------- sounds & vibration ---------- */
   // the call rings until someone answers, declines or the caller cancels (like WhatsApp/Messenger)
   useTone("ring", Boolean(incoming));
-  useTone("ringback", call?.status === "ringing");
+  useTone("ringback", call?.status === "ringing" || call?.status === "calling");
   useTone("busy", Boolean(ended?.tone), false);
 
   // the phone vibrates for as long as it rings

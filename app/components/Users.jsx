@@ -6,6 +6,7 @@ import {
   FiImage,
   FiMic,
   FiMoreHorizontal,
+  FiPhone,
   FiPhoneIncoming,
   FiPhoneMissed,
   FiPhoneOutgoing,
@@ -43,6 +44,12 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
   const { setMessages, setCallLogs } = useContext(MessageContext);
   const [requestId, setRequestId] = useState(null);
   const [menuFor, setMenuFor] = useState(null);
+  const [liveCall, setLiveCall] = useState(() => (typeof window !== "undefined" ? window.__convoLiveCall || null : null));
+  useEffect(() => {
+    const onCallState = (event) => setLiveCall(event.detail || null);
+    window.addEventListener("chat:call-state", onCallState);
+    return () => window.removeEventListener("chat:call-state", onCallState);
+  }, []);
   const [showArchived, setShowArchived] = useState(false);
   const menuRef = useRef(null);
   const requestIdRef = useRef(0);
@@ -193,7 +200,12 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
             video: { Icon: FiVideo, text: "Video" },
             file: { Icon: FiFile, text: contact?.last_message_attachment || "Attachment" },
           }[contact?.last_message_type];
-          const PreviewIcon = isCallPreview
+          const inCall = Boolean(liveCall) &&
+            String(liveCall.peerId) === String(contact?._id) &&
+            Boolean(liveCall.isGroup) === (Number(contact?.is_group) === 1);
+          const PreviewIcon = inCall
+            ? liveCall.isVideo ? FiVideo : FiPhone
+            : isCallPreview
             ? isMissedCall
               ? FiPhoneMissed
               : contact?.last_call_is_video
@@ -202,7 +214,9 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                   ? FiPhoneOutgoing
                   : FiPhoneIncoming
             : mediaPreview?.Icon;
-          const preview = isCallPreview
+          const preview = inCall
+            ? (liveCall.isVideo ? "Video call" : "Voice call")
+            : isCallPreview
             ? callLabel
             : mediaPreview?.text || contact?.last_message || "";
           const preferenceKey = `${contact?.is_group ? "group" : "user"}:${contact?._id}`;
@@ -241,7 +255,7 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                   </div>
                   {preview && (
                     <p className={`mt-1 flex items-center gap-1 truncate text-xs ${isMissedCall ? "text-rose-300" : "text-[#c7d2e3]"}`}>
-                      {mine && (contact?.last_message_status > 0
+                      {!inCall && mine && (contact?.last_message_status > 0
                         ? <MdDoneAll className="shrink-0 text-indigo-300" aria-label="Seen" />
                         : <MdDone className="shrink-0 text-[#91a0b7]" aria-label="Sent, not seen" />)}
                       {contact?.is_group === 1 && contact?.last_message_sender_id && (
@@ -249,11 +263,12 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                       )}
                       {PreviewIcon && (
                         <PreviewIcon
-                          className={`shrink-0 ${!isCallPreview && contact?.last_message_type === "audio" ? "text-emerald-400" : ""}`}
+                          className={`shrink-0 ${inCall || (!isCallPreview && contact?.last_message_type === "audio") ? "text-emerald-400" : ""}`}
                           aria-hidden="true"
                         />
                       )}
                       <span className="truncate">{preview}</span>
+                      {inCall && <span className="shrink-0 font-semibold text-emerald-400">In call</span>}
                     </p>
                   )}
                   {(contact?.blocked || contact?.blockedByPartner) && (

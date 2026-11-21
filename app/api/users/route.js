@@ -41,7 +41,6 @@ export async function GET(request) {
                     { phone: { $regex: new RegExp(escapedSearch, 'i') } },
                     ...(nicknameMatchIds.length ? [{ _id: { $in: nicknameMatchIds } }] : []),
                 ],
-                ...(search ? {} : { _id: { $ne: authObjectId } }),
             }
         },
         {

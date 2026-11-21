@@ -54,9 +54,6 @@ export async function GET(request) {
     );
     match = { group_id: referenceId, receiver_id: currentUserId };
   } else {
-    if (referenceId.equals(currentUserId)) {
-      return NextResponse.json({ success: false, message: "A conversation partner is required." }, { status: 400 });
-    }
     unreadLogs = markRead ? await messageLogSchema.find({
       sender_id: referenceId,
       receiver_id: currentUserId,
@@ -151,7 +148,7 @@ export async function GET(request) {
   ];
   const [data, callLogs] = await Promise.all([
     messageLogSchema.aggregate(messagePipeline),
-    callLogSchema.find({
+    !isGroup && referenceId.equals(currentUserId) ? [] : callLogSchema.find({
       participants: currentUserId,
       ...callLogConversationMatch(currentUserId, referenceId, isGroup),
       deletedFor: { $ne: currentUserId },

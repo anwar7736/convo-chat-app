@@ -247,17 +247,19 @@ export default function ConversationMenu({ conversation, onViewContact }) {
             <FiSearch /> Search
           </button>
           <button type="button" role="menuitem" onClick={openMedia}><FiImage /> Media, files & links</button>
-          {conversation?.is_group !== 1 && (
+          {conversation?.is_group !== 1 && !conversation?.is_self && (
             <button type="button" role="menuitem" onClick={() => { setOpen(false); setNicknamesOpen(true); }}>
               <FiUser /> Nicknames
             </button>
           )}
           <button type="button" role="menuitem" onClick={() => { setOpen(false); onViewContact?.(); }}><FiUser /> View contact</button>
           <button type="button" role="menuitem" onClick={exportChat}><FiDownload /> Export chat</button>
-          <button type="button" role="menuitem" onClick={toggleMute} disabled={savingMute}>
-            {muted ? <FiBell /> : <FiBellOff />}
-            {muted ? "Unmute notifications" : "Mute notifications"}
-          </button>
+          {!conversation?.is_self && (
+            <button type="button" role="menuitem" onClick={toggleMute} disabled={savingMute}>
+              {muted ? <FiBell /> : <FiBellOff />}
+              {muted ? "Unmute notifications" : "Mute notifications"}
+            </button>
+          )}
         </div>
       )}
       {searchOpen && (

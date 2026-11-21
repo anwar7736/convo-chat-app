@@ -473,6 +473,21 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     peer.ontrack = (event) => {
       const stream = event.streams[0];
       if (stream) setRemoteStreams((streams) => ({ ...streams, [peerId]: stream }));
+      // the other side turned its camera on in a voice call: this side becomes a video call too
+      const active = callRef.current;
+      if (event.track.kind === "video" && active && active.callId === callId && !active.isVideo) {
+        const next = { ...active, isVideo: true };
+        callRef.current = next;
+        setCall(next);
+        if (!localStreamRef.current?.getVideoTracks().length) {
+          setCameraOff(true);
+          socket.emit("call:media-status", {
+            callId,
+            muted: !localStreamRef.current?.getAudioTracks()[0]?.enabled,
+            cameraOff: true,
+          });
+        }
+      }
     };
     let restarts = 0;
     let disconnectTimer = null;
@@ -527,43 +542,39 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
       const videoTrack = stream.getVideoTracks()[0];
       if (!videoTrack) return;
-      for (const peer of peersRef.current.values()) {
-        peer.addTrack(videoTrack, localStreamRef.current);
-      }
+      const wasVideo = Boolean(callRef.current.isVideo);
       localStreamRef.current.addTrack(videoTrack);
+      // the other side only receives the new video after a fresh offer/answer round
+      for (const [peerId, peer] of peersRef.current.entries()) {
+        peer.addTrack(videoTrack, localStreamRef.current);
+        if (peer.signalingState !== "stable") continue;
+        try {
+          const offer = await peer.createOffer();
+          await peer.setLocalDescription(offer);
+          socket.emit("call:signal", { callId: callRef.current.callId, to: peerId, signal: { description: peer.localDescription.toJSON() } });
+        } catch (error) {
+          console.error("Unable to share the camera:", error);
+        }
+      }
       setCameraOff(false);
       const upgraded = { ...callRef.current, isVideo: true };
       callRef.current = upgraded;
       setCall(upgraded);
-      socket.emit("call:media-status", { callId: upgraded.callId, muted, cameraOff: false, upgradedToVideo: true });
-      await updateCallLog(upgraded.callId, "upgrade-video");
+      socket.emit("call:media-status", { callId: upgraded.callId, muted, cameraOff: false });
+      if (!wasVideo) await updateCallLog(upgraded.callId, "upgrade-video");
     } catch (error) {
       toast.error("Could not turn camera on: " + (error.message || "unknown error"));
     }
   };
 
-  const disableCameraTrack = () => {
-    const tracks = localStreamRef.current?.getVideoTracks() || [];
-    tracks.forEach((track) => { track.enabled = false; track.stop(); localStreamRef.current.removeTrack(track); });
-    const downgraded = { ...callRef.current, isVideo: false };
-    callRef.current = downgraded;
-    setCall(downgraded);
-    socket.emit("call:media-status", { callId: downgraded.callId, muted, cameraOff: false, downgradedToAudio: true });
-  };
-
   const toggleTrack = (kind) => {
     const tracks = kind === "audio" ? localStreamRef.current?.getAudioTracks() : localStreamRef.current?.getVideoTracks();
     if (!tracks?.length) {
-      if (kind === "video" && callRef.current && !callRef.current.isVideo) {
-        enableCameraInAudioCall();
-      }
+      // no camera shared yet (voice call, or the other side started the video): turn it on and renegotiate
+      if (kind === "video" && callRef.current) enableCameraInAudioCall();
       return;
     }
     const enabled = !tracks[0].enabled;
-    if (kind === "video" && !enabled) {
-      disableCameraTrack();
-      return;
-    }
     tracks.forEach((track) => { track.enabled = enabled; });
     if (kind === "audio") setMuted(!enabled);
     else setCameraOff(!enabled);
@@ -1064,6 +1075,11 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         }
         if (signal.description?.type === "offer") {
           diag((d) => { d.offer = "recv"; });
+          // both sides turned a camera on at the same moment: the higher id steps back, the other keeps its offer
+          if (peer.signalingState !== "stable") {
+            if (currentUserIdRef.current < from) return;
+            await peer.setLocalDescription({ type: "rollback" });
+          }
           await peer.setRemoteDescription(new RTCSessionDescription(signal.description));
           await flushCandidates(from, peer);
           const answer = await peer.createAnswer();
@@ -1226,6 +1242,19 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     };
   }, [call, callMinimized, facingMode]);
 
+  // the conversation list shows "In call" next to this person/group while the call runs
+  useEffect(() => {
+    const detail = call
+      ? {
+        peerId: String(call.isGroup || call.isCaller ? call.conversationId : call.callerId),
+        isGroup: Boolean(call.isGroup),
+        isVideo: Boolean(call.isVideo),
+      }
+      : null;
+    window.__convoLiveCall = detail;
+    window.dispatchEvent(new CustomEvent("chat:call-state", { detail }));
+  }, [call?.callId, call?.isVideo, call?.isGroup, call?.isCaller, call?.conversationId, call?.callerId]);
+
   const remoteEntries = Object.entries(remoteStreams);
   const statusText = call
     ? call.mediaConnected
@@ -1270,57 +1299,11 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     window.dispatchEvent(new Event("chat:scroll-bottom"));
   }, [callScreenOpen]);
   // the small "call in progress" bar can be dragged anywhere on screen (a tap still presses its buttons)
-  const [miniOffset, setMiniOffset] = useState({ x: 0, y: 0 });
   const [selfViewOffset, setSelfViewOffset] = useState({ x: 0, y: 0 });
   const selfViewDragRef = useRef(null);
   const suppressSelfViewClickRef = useRef(false);
-  const miniDragRef = useRef(null);
-  const suppressMiniClickRef = useRef(false);
-  const onMiniPointerDown = (event) => {
-    if (event.button !== undefined && event.button !== 0) return;
-    const screen = event.currentTarget.closest(".call-screen");
-    if (!screen) return;
-    miniDragRef.current = {
-      startX: event.clientX,
-      startY: event.clientY,
-      base: miniOffset,
-      rect: screen.getBoundingClientRect(),
-      moved: false,
-    };
-  };
   useEffect(() => {
-    if (!callMinimized) return;
-    const onMove = (event) => {
-      const drag = miniDragRef.current;
-      if (!drag) return;
-      const dx = event.clientX - drag.startX;
-      const dy = event.clientY - drag.startY;
-      if (!drag.moved && Math.hypot(dx, dy) < 6) return; // a tap, not a drag
-      drag.moved = true;
-      event.preventDefault();
-      const margin = 8;
-      const clampedX = Math.min(window.innerWidth - margin - drag.rect.right, Math.max(margin - drag.rect.left, dx));
-      const clampedY = Math.min(window.innerHeight - margin - drag.rect.bottom, Math.max(margin - drag.rect.top, dy));
-      setMiniOffset({ x: drag.base.x + clampedX, y: drag.base.y + clampedY });
-    };
-    const onUp = () => {
-      if (miniDragRef.current?.moved) suppressMiniClickRef.current = true; // the release is not a button press
-      miniDragRef.current = null;
-    };
-    const onResize = () => setMiniOffset({ x: 0, y: 0 }); // rotated/resized: back to its corner, never off screen
-    window.addEventListener("pointermove", onMove, { passive: false });
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    window.addEventListener("resize", onResize);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-      window.removeEventListener("resize", onResize);
-    };
-  }, [callMinimized]);
-  useEffect(() => {
-    if (!call) { setMiniOffset({ x: 0, y: 0 }); setSelfViewOffset({ x: 0, y: 0 }); }
+    if (!call) setSelfViewOffset({ x: 0, y: 0 });
   }, [call]);
 
   // self-view small card is draggable (same as mini bar)
@@ -1335,9 +1318,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       drag.moved = true;
       event.preventDefault();
       const margin = 8;
-      const clampedX = Math.min(window.innerWidth - drag.rect.right - margin, Math.max(margin - drag.rect.left, drag.base.x + dx));
-      const clampedY = Math.min(window.innerHeight - drag.rect.bottom - margin, Math.max(margin - drag.rect.top, drag.base.y + dy));
-      setSelfViewOffset({ x: clampedX, y: clampedY });
+      const clampedX = Math.min(window.innerWidth - margin - drag.rect.right, Math.max(margin - drag.rect.left, dx));
+      const clampedY = Math.min(window.innerHeight - margin - drag.rect.bottom, Math.max(margin - drag.rect.top, dy));
+      setSelfViewOffset({ x: drag.base.x + clampedX, y: drag.base.y + clampedY });
     };
     const onUp = () => {
       if (selfViewDragRef.current?.moved) suppressSelfViewClickRef.current = true;
@@ -1452,8 +1435,6 @@ export default function CallControls({ conversation, currentUser, showButtons = 
               role={callMinimized ? "region" : "dialog"}
               aria-modal={!callMinimized}
               aria-label={callMinimized ? "Call in progress" : "Call"}
-              // `translate` (not `transform`): the bar's pop-in animation keeps its own transform
-              style={callMinimized ? { translate: `${miniOffset.x}px ${miniOffset.y}px` } : undefined}
             >
               {/* exactly one sound source per person: the visible video plays it (as in the version that
                   worked); a plain audio element only when there is no visible video (voice call, camera off, minimized) */}
@@ -1496,7 +1477,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                     event.preventDefault();
                     event.stopPropagation();
                   }}
-                  {...(localVideoExpanded ? swapProps(!localVideoExpanded, "Show your video full screen") : { title: "Drag to move · tap to swap" })}
+                  {...swapProps(!localVideoExpanded, "Show your video full screen")}
                   autoPlay
                   playsInline
                   muted
@@ -1504,17 +1485,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
               )}
 
               {callMinimized ? (
-                <div
-                  className="call-mini-bar"
-                  onPointerDown={onMiniPointerDown}
-                  onClickCapture={(event) => {
-                    if (!suppressMiniClickRef.current) return;
-                    suppressMiniClickRef.current = false;
-                    event.preventDefault();
-                    event.stopPropagation();
-                  }}
-                  title="Drag to move"
-                >
+                <div className="call-mini-bar">
                   <button type="button" className="call-mini-main" onClick={() => setCallMinimized(false)} aria-label={`Return to ${callName || "call"}`}>
                     <span className="call-mini-pulse" />
                     <span className="call-mini-text">{callName || "Call"} · {statusText}</span>
@@ -1593,7 +1564,13 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                             { id: "speaker", label: "Speaker", icon: FiVolume2 },
                             { id: "earpiece", label: "Earpiece", icon: FiSmartphone },
                             { id: "bluetooth", label: "Bluetooth", icon: FiBluetooth },
-                          ].map(({ id, label, icon: Icon }) => (
+                          ].filter(({ id }) => {
+                            if (id === "speaker" || audioRoute === id) return true;
+                            const outputs = audioDevices.filter((device) => device.kind === "audiooutput");
+                            const pattern = id === "earpiece" ? /earpiece|receiver|phone/i : /bluetooth|headset|headphone/i;
+                            return outputs.some((device) => pattern.test(device.label || "")) ||
+                              (id === "bluetooth" && typeof navigator.mediaDevices?.selectAudioOutput === "function");
+                          }).map(({ id, label, icon: Icon }) => (
                             <button
                               key={id}
                               type="button"

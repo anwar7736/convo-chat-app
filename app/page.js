@@ -270,6 +270,7 @@ const Home = () => {
   useEffect(() => {
     if (!authUser?._id) return;
     const confirmClose = (event) => {
+      if (window.__convoLoggingOut) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -1140,7 +1141,7 @@ const Home = () => {
               <CallControls
                 conversation={user}
                 currentUser={authUser}
-                showButtons={Boolean(user)}
+                showButtons={Boolean(user) && !user?.is_self}
                 blocked={Boolean(user?.blocked || user?.blockedByPartner)}
               />
               {user && <ConversationMenu conversation={user} onViewContact={handleEditOrViewModal} />}

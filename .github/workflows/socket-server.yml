@@ -1,0 +1,101 @@
+name: Socket server CI/CD
+
+# Tests run on every change to socket-server/ (pushes and pull requests).
+# A push to main that passes the tests is deployed to the droplet.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "socket-server/**"
+      - ".github/workflows/socket-server.yml"
+  pull_request:
+    paths:
+      - "socket-server/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: socket-server-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: socket-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: socket-server/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Prepare SSH
+        env:
+          SSH_KEY: ${{ secrets.DROPLET_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DROPLET_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy and verify
+        env:
+          HOST: ${{ secrets.DROPLET_HOST }}
+          SSH_USER: ${{ secrets.DROPLET_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          REPO=/srv/socket-server/repo
+          APP=$REPO/socket-server
+          SERVICE=cs-socket-server
+          run() { sudo -u socketsrv "$@"; }
+
+          healthy() {
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3002/socket.io/?EIO=4&transport=polling' || true)
+              [ "$code" = "200" ] && return 0
+              sleep 2
+            done
+            return 1
+          }
+
+          cd "$REPO"
+          PREVIOUS=$(run git rev-parse HEAD)
+          run git fetch origin main -q
+          run git merge --ff-only origin/main -q
+          CURRENT=$(run git rev-parse --short HEAD)
+          echo "deploying $PREVIOUS -> $CURRENT"
+
+          cd "$APP"
+          run npm ci --omit=dev --no-audit --no-fund
+          node --check server.js
+          supervisorctl restart "$SERVICE"
+
+          if healthy; then
+            echo "healthy on $CURRENT"
+          else
+            echo "unhealthy: rolling back to $PREVIOUS"
+            cd "$REPO"
+            run git reset --hard "$PREVIOUS"
+            cd "$APP"
+            run npm ci --omit=dev --no-audit --no-fund
+            supervisorctl restart "$SERVICE"
+            healthy || echo "rollback is not healthy either, check the droplet"
+            exit 1
+          fi
+          REMOTE

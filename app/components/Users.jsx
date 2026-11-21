@@ -17,7 +17,7 @@ import { MdDone, MdDoneAll } from "react-icons/md";
 import { toast } from "sonner";
 import { UserContext } from "../contexts/UserContext";
 import { MessageContext } from "../contexts/MessageContext";
-import { activityFormat, getImageURL, loadConversationTimeline } from "../helpers/helper";
+import { activityFormat, getImageURL, loadConversationTimeline, socket_connection } from "../helpers/helper";
 import { UserListContext } from "../contexts/UserListContext";
 
 const conversationDateLabel = (value) => {
@@ -61,6 +61,7 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
       setTypingByChat((current) => ({ ...current, [key]: isGroup ? String(event.sender_name || "Someone") : "" }));
       timers.set(key, setTimeout(clear, 4000));
     };
+    const socket = socket_connection();
     socket.on("typing-status", onTyping);
     return () => {
       socket.off("typing-status", onTyping);

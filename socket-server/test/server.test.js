@@ -463,6 +463,34 @@ test("call: the caller's tab closing ends the call for the other side", async ()
   b.disconnect();
 });
 
+test("call: a dropped network keeps the call; coming back on a new socket resumes it", async () => {
+  const a = await connect(A);
+  const b = await connect(B);
+  const callId = randomUUID();
+  const ring = next(b, "call:invite");
+  a.emit("call:invite", { callId, recipients: [B], callerName: "A" });
+  await ring;
+  const joined = next(a, "call:participant");
+  b.emit("call:accept", { callId, callerId: A });
+  await joined;
+  const endedEarly = next(b, "call:end", 800);
+  a.io.engine.close(); // the network went away: not a deliberate hang-up
+  assert.equal(await endedEarly, "none");
+  const a2 = await connect(A);
+  const back = next(b, "call:rejoined");
+  const ok = next(a2, "call:rejoin-ok");
+  a2.emit("call:rejoin", { callId });
+  assert.equal((await ok).callId, callId);
+  assert.equal((await back).userId, A);
+  const signal = next(b, "call:signal");
+  a2.emit("call:signal", { callId, to: B, signal: { candidate: { candidate: "x" } } });
+  assert.equal((await signal).from, A);
+  const unknown = next(a2, "call:end");
+  a2.emit("call:rejoin", { callId: randomUUID() });
+  assert.equal((await unknown).reason, "ended");
+  [a2, b].forEach((s) => s.disconnect());
+});
+
 test("presence: a user stays online while another tab is open", async () => {
   const a1 = await connect(A);
   const a2 = await connect(A);

@@ -55,6 +55,8 @@ const CALL_MAX_RING_MS = 10 * 60 * 1000;
 // someone who is offline when called still gets the call for a while: the caller keeps seeing "Ringing",
 // and the invite reaches them if they come online before it runs out
 const CALL_OFFLINE_RING_MS = 60 * 1000;
+// a network switch (Wi-Fi to mobile data) drops the socket for a moment: the person has this long to come back to the call
+const CALL_RECONNECT_MS = 30 * 1000;
 // per socket: a burst of events (a group call sends many ICE candidates at once), then a steady rate
 const EVENT_BURST = 300;
 const EVENT_RATE = 30;
@@ -600,6 +602,23 @@ io.on("connection", (socket) => {
     }
   });
 
+  // the person is back on a new socket (after a network switch): take the seat again, tell the others to re-route
+  socket.on("call:rejoin", (data) => {
+    const payload = parsePayload(data);
+    const call = calls.get(payload?.callId);
+    if (!call?.accepted.has(userId)) {
+      socket.emit("call:end", { callId: payload?.callId, userId, reason: "ended" });
+      return;
+    }
+    clearTimeout(call.graceTimers?.get(userId));
+    call.graceTimers?.delete(userId);
+    call.sockets.set(userId, socket.id);
+    socket.emit("call:rejoin-ok", { callId: payload.callId });
+    for (const participantId of call.accepted) {
+      if (participantId !== userId) emitToCallMember(call, participantId, "call:rejoined", { callId: payload.callId, userId });
+    }
+  });
+
   socket.on("call:end", (data) => {
     const payload = parsePayload(data);
     const call = calls.get(payload?.callId);
@@ -608,9 +627,21 @@ io.on("connection", (socket) => {
   });
 
   // The socket has already left its rooms here.
-  socket.on("disconnect", () => {
+  socket.on("disconnect", (reason) => {
     for (const [callId, call] of calls) {
-      if (call.sockets.get(userId) === socket.id) leaveCall(callId, userId);
+      if (call.sockets.get(userId) !== socket.id) continue;
+      // hung up on purpose, or still ringing: leave now. A dropped network: keep the seat for a short while.
+      if (reason === "client namespace disconnect" || call.accepted.size <= 1) {
+        leaveCall(callId, userId);
+        continue;
+      }
+      call.sockets.delete(userId);
+      call.graceTimers ||= new Map();
+      clearTimeout(call.graceTimers.get(userId));
+      call.graceTimers.set(userId, setTimeout(() => {
+        call.graceTimers.delete(userId);
+        if (calls.get(callId) === call && !call.sockets.has(userId)) leaveCall(callId, userId);
+      }, CALL_RECONNECT_MS));
     }
     if (isOnline(userId)) return; // another tab of this user is still open
     if (onlineUsers.delete(userId)) {
@@ -656,6 +687,8 @@ function leaveCall(callId, userId) {
   }
   call.accepted.delete(userId);
   call.sockets.delete(userId);
+  clearTimeout(call.graceTimers?.get(userId));
+  call.graceTimers?.delete(userId);
   for (const participantId of call.accepted) {
     emitToCallMember(call, participantId, "call:left", { callId, userId });
   }
@@ -666,6 +699,7 @@ function endCall(callId, userId, reason = "ended") {
   const call = calls.get(callId);
   if (!call) return;
   clearTimeout(call.timer);
+  for (const timer of call.graceTimers?.values() || []) clearTimeout(timer);
   calls.delete(callId);
   for (const memberId of call.invited) {
     if (memberId === userId && reason === "ended") continue;

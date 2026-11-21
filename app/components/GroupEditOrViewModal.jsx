@@ -661,6 +661,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
             ) : null}
             <h1 className="break-words px-8 text-lg font-bold">{selectedUser?.nickname || data.name}</h1>
             <div className="w-full max-w-md mt-5">
+              {String(data?._id) !== String(user?._id) && (
               <div className="mb-4 text-left">
                 <label className="mb-2 block text-sm font-semibold" htmlFor="contact-nickname">
                   Your nickname for them
@@ -691,6 +692,7 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
                   </span>
                 </div>
               </div>
+              )}
               <div className="mb-4">
                 <div>{data.phone}</div>
               </div>

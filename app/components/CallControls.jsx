@@ -515,7 +515,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       }
       // a dropped network (Wi-Fi to mobile data, a short outage): the side that made the offer
       // asks for a fresh route a couple of times before giving the participant up
-      if (peer.connectionState === "failed" && restarts < 2 && currentUserIdRef.current < peerId) {
+      if (peer.connectionState === "failed" && restarts < 10 && currentUserIdRef.current < peerId) {
         restarts += 1;
         try {
           peer.restartIce?.();
@@ -528,7 +528,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         }
       }
       if (peer.connectionState === "connected") restarts = 0;
-      if (peer.connectionState === "closed" || (peer.connectionState === "failed" && restarts >= 2)) {
+      if (peer.connectionState === "closed" || (peer.connectionState === "failed" && restarts >= 10)) {
         removePeer(peerId);
       }
     };
@@ -999,7 +999,44 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
   /* ---------- socket events ---------- */
   useEffect(() => {
-    const onConnect = () => setSocketConnected(true);
+    // a fresh route for one person (after a network switch): only the lower id makes the offer, as at the start
+    const restartPeer = async (peerId) => {
+      const peer = peersRef.current.get(peerId);
+      const active = callRef.current;
+      if (!peer || !active || currentUserIdRef.current >= peerId) return;
+      try {
+        peer.restartIce?.();
+        const offer = await peer.createOffer({ iceRestart: true });
+        await peer.setLocalDescription(offer);
+        socket.emit("call:signal", { callId: active.callId, to: peerId, signal: { description: peer.localDescription.toJSON() } });
+      } catch (error) {
+        console.error("Unable to re-route the call:", error);
+      }
+    };
+    // back on a new socket (Wi-Fi to mobile data): take the seat in the call again
+    const onConnect = () => {
+      setSocketConnected(true);
+      const active = callRef.current;
+      if (active) socket.emit("call:rejoin", { callId: active.callId });
+    };
+    const onRejoinOk = ({ callId }) => {
+      if (callRef.current?.callId !== callId) return;
+      for (const peerId of peersRef.current.keys()) restartPeer(peerId);
+    };
+    const onRejoined = ({ callId, userId }) => {
+      if (callRef.current?.callId === callId) restartPeer(userId);
+    };
+    // the phone switched networks: do not wait for the old connection to time out, reconnect now
+    const onNetworkChange = () => {
+      if (callRef.current) socket.io?.engine?.close();
+    };
+    let lastNetworkType = navigator.connection?.type;
+    const onConnectionChange = () => {
+      const type = navigator.connection?.type;
+      if (type === lastNetworkType) return; // only a real switch (wifi / cellular), not a speed change
+      lastNetworkType = type;
+      onNetworkChange();
+    };
     const onDisconnect = () => setSocketConnected(false);
     const onCallLogUpdated = () => loadCallHistory();
     const onInvite = async (invite) => {
@@ -1188,6 +1225,10 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     socket.on("call-log-updated", onCallLogUpdated);
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
+    socket.on("call:rejoin-ok", onRejoinOk);
+    socket.on("call:rejoined", onRejoined);
+    window.addEventListener("online", onNetworkChange);
+    navigator.connection?.addEventListener?.("change", onConnectionChange);
     socket.on("call:participant", onParticipant);
     socket.on("call:signal", onSignal);
     socket.on("call:end", onEnded);
@@ -1203,6 +1244,10 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       socket.off("call-log-updated", onCallLogUpdated);
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
+      socket.off("call:rejoin-ok", onRejoinOk);
+      socket.off("call:rejoined", onRejoined);
+      window.removeEventListener("online", onNetworkChange);
+      navigator.connection?.removeEventListener?.("change", onConnectionChange);
       socket.off("call:participant", onParticipant);
       socket.off("call:signal", onSignal);
       socket.off("call:end", onEnded);

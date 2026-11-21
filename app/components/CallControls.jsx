@@ -1294,11 +1294,12 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         peerId: String(call.isGroup || call.isCaller ? call.conversationId : call.callerId),
         isGroup: Boolean(call.isGroup),
         isVideo: Boolean(call.isVideo),
+        phase: call.connectedAt ? "connected" : call.status === "ringing" ? "ringing" : "calling",
       }
       : null;
     window.__convoLiveCall = detail;
     window.dispatchEvent(new CustomEvent("chat:call-state", { detail }));
-  }, [call?.callId, call?.isVideo, call?.isGroup, call?.isCaller, call?.conversationId, call?.callerId]);
+  }, [call?.callId, call?.isVideo, call?.isGroup, call?.isCaller, call?.conversationId, call?.callerId, call?.status, call?.connectedAt]);
 
   const remoteEntries = Object.entries(remoteStreams);
   const statusText = call

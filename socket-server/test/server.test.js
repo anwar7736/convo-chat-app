@@ -532,18 +532,21 @@ test("a flood of events is cut off", async () => {
 
 test("call: an offline recipient keeps the call ringing and gets the invite when they come online", async () => {
   const a = await connect(A);
-  const ringing = next(a, "call:ringing");
+  const earlyRinging = next(a, "call:ringing");
   const noUnavailable = next(a, "call:unavailable");
   const callId = randomUUID();
   a.emit("call:invite", { callId, recipients: [B], callerName: "A" });
-  assert.equal((await ringing).callId, callId);
-  assert.equal(await noUnavailable, "none"); // not "unavailable": the call keeps ringing
+  // nobody's phone is ringing yet: the caller stays on "calling", and the call is not "unavailable" either
+  assert.equal(await earlyRinging, "none");
+  assert.equal(await noUnavailable, "none");
 
   const b = await connect(B, { register: false });
   const pendingInvite = next(b, "call:invite", 1500);
+  const nowRinging = next(a, "call:ringing", 1500);
   b.emit("register-user");
   const invite = await pendingInvite;
   assert.equal(invite.callId, callId);
   assert.equal(invite.callerId, A);
+  assert.equal((await nowRinging).callId, callId); // the phone rings now, so the caller sees "ringing"
   [a, b].forEach((socket) => socket.disconnect());
 });

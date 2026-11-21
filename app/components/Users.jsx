@@ -45,6 +45,28 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
   const [requestId, setRequestId] = useState(null);
   const [menuFor, setMenuFor] = useState(null);
   const [liveCall, setLiveCall] = useState(() => (typeof window !== "undefined" ? window.__convoLiveCall || null : null));
+  const [typingByChat, setTypingByChat] = useState({});
+  const meIdRef = useRef("");
+  meIdRef.current = String(authUser?._id || "");
+  useEffect(() => {
+    const timers = new Map();
+    const onTyping = (event) => {
+      const isGroup = Boolean(event?.is_group);
+      if (!event?.sender_id || String(event.sender_id) === meIdRef.current) return;
+      if (!isGroup && String(event.receiver_id) !== meIdRef.current) return;
+      const key = (isGroup ? 1 : 0) + ":" + (isGroup ? event.receiver_id : event.sender_id);
+      clearTimeout(timers.get(key));
+      const clear = () => setTypingByChat((current) => { const next = { ...current }; delete next[key]; return next; });
+      if (!event.typing) { clear(); return; }
+      setTypingByChat((current) => ({ ...current, [key]: isGroup ? String(event.sender_name || "Someone") : "" }));
+      timers.set(key, setTimeout(clear, 4000));
+    };
+    socket.on("typing-status", onTyping);
+    return () => {
+      socket.off("typing-status", onTyping);
+      timers.forEach((timer) => clearTimeout(timer));
+    };
+  }, []);
   useEffect(() => {
     const onCallState = (event) => setLiveCall(event.detail || null);
     window.addEventListener("chat:call-state", onCallState);
@@ -203,7 +225,11 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
           const inCall = Boolean(liveCall) &&
             String(liveCall.peerId) === String(contact?._id) &&
             Boolean(liveCall.isGroup) === (Number(contact?.is_group) === 1);
-          const PreviewIcon = inCall
+          const typingName = typingByChat[(Number(contact?.is_group) === 1 ? 1 : 0) + ":" + contact?._id];
+          const isTyping = typingName !== undefined;
+          const PreviewIcon = isTyping
+            ? null
+            : inCall
             ? liveCall.isVideo ? FiVideo : FiPhone
             : isCallPreview
             ? isMissedCall
@@ -214,7 +240,9 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                   ? FiPhoneOutgoing
                   : FiPhoneIncoming
             : mediaPreview?.Icon;
-          const preview = inCall
+          const preview = isTyping
+            ? (typingName ? typingName + " is typing…" : "typing…")
+            : inCall
             ? (liveCall.isVideo ? "Video call" : "Voice call")
             : isCallPreview
             ? callLabel
@@ -254,7 +282,7 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                     )}
                   </div>
                   {preview && (
-                    <p className={`mt-1 flex items-center gap-1 truncate text-xs ${isMissedCall ? "text-rose-300" : "text-[#c7d2e3]"}`}>
+                    <p className={`mt-1 flex items-center gap-1 truncate text-xs ${isTyping ? "text-emerald-400" : isMissedCall ? "text-rose-300" : "text-[#c7d2e3]"}`}>
                       {!inCall && mine && (contact?.last_message_status > 0
                         ? <MdDoneAll className="shrink-0 text-indigo-300" aria-label="Seen" />
                         : <MdDone className="shrink-0 text-[#91a0b7]" aria-label="Sent, not seen" />)}
@@ -268,7 +296,11 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                         />
                       )}
                       <span className="truncate">{preview}</span>
-                      {inCall && <span className="shrink-0 font-semibold text-emerald-400">In call</span>}
+                      {!isTyping && inCall && (
+                        <span className="shrink-0 font-semibold text-emerald-400">
+                          {liveCall.phase === "connected" ? "In call" : liveCall.phase === "ringing" ? "Ringing…" : "Calling…"}
+                        </span>
+                      )}
                     </p>
                   )}
                   {(contact?.blocked || contact?.blockedByPartner) && (

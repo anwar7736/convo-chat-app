@@ -179,6 +179,7 @@ io.on("connection", (socket) => {
     for (const call of calls.values()) {
       if (call.offlineRecipients?.delete(userId) && !call.accepted.has(userId) && !call.rejected.has(userId)) {
         emitToUser(userId, "call:invite", call.invitePayload);
+        emitToCallMember(call, call.callerId, "call:ringing", { callId: call.invitePayload.callId });
       }
     }
     const active = Array.from(onlineUsers);
@@ -532,7 +533,8 @@ io.on("connection", (socket) => {
       timer,
     });
     for (const recipientId of availableRecipients) emitToUser(recipientId, "call:invite", invitePayload);
-    socket.emit("call:ringing", { callId: invite.callId });
+    // "ringing" only when a phone is really being rung; an offline person leaves the caller on "calling"
+    if (availableRecipients.length) socket.emit("call:ringing", { callId: invite.callId });
   });
 
   socket.on("call:accept", (data) => {

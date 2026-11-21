@@ -57,45 +57,6 @@ jobs:
         env:
           HOST: ${{ secrets.DROPLET_HOST }}
           SSH_USER: ${{ secrets.DROPLET_USER }}
-        run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes "$SSH_USER@$HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          REPO=/srv/socket-server/repo
-          APP=$REPO/socket-server
-          SERVICE=cs-socket-server
-          run() { sudo -u socketsrv "$@"; }
-
-          healthy() {
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-              code=$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3002/socket.io/?EIO=4&transport=polling' || true)
-              [ "$code" = "200" ] && return 0
-              sleep 2
-            done
-            return 1
-          }
-
-          cd "$REPO"
-          PREVIOUS=$(run git rev-parse HEAD)
-          run git fetch origin main -q
-          run git merge --ff-only origin/main -q
-          CURRENT=$(run git rev-parse --short HEAD)
-          echo "deploying $PREVIOUS -> $CURRENT"
-
-          cd "$APP"
-          run npm ci --omit=dev --no-audit --no-fund
-          node --check server.js
-          supervisorctl restart "$SERVICE"
-
-          if healthy; then
-            echo "healthy on $CURRENT"
-          else
-            echo "unhealthy: rolling back to $PREVIOUS"
-            cd "$REPO"
-            run git reset --hard "$PREVIOUS"
-            cd "$APP"
-            run npm ci --omit=dev --no-audit --no-fund
-            supervisorctl restart "$SERVICE"
-            healthy || echo "rollback is not healthy either, check the droplet"
-            exit 1
-          fi
-          REMOTE
+        # site-deploy on the droplet reads /etc/site-deploy/socket.conf, pulls main, installs, restarts,
+        # checks the handshake and rolls back by itself when it is not healthy
+        run: ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes "$SSH_USER@$HOST" "sudo -n /usr/local/sbin/site-deploy socket"

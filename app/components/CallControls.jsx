@@ -404,6 +404,17 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const microphones = audioDevices.filter((device) =>
     device.kind === "audioinput" && device.deviceId !== "default" && device.deviceId !== "communications");
 
+  // the picker shows the microphone that is really in use, read from the live audio track
+  const [activeMicId, setActiveMicId] = useState("");
+  useEffect(() => {
+    const track = localStreamRef.current?.getAudioTracks?.()[0];
+    if (!call || !track) { setActiveMicId(""); return; }
+    const settings = track.getSettings?.() || {};
+    const match = microphones.find((device) => device.deviceId === settings.deviceId) ||
+      microphones.find((device) => settings.groupId && device.groupId === settings.groupId);
+    setActiveMicId(match?.deviceId || "");
+  }, [call?.callId, call?.mediaConnected, audioDevices, audioInputId]);
+
   const changeAudioRoute = async (route) => {
     const outputs = audioDevices.filter((device) => device.kind === "audiooutput");
     const matches = {
@@ -1336,9 +1347,56 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       ? call.conversationName
       : personFor(call.callerId)?.nickname || call.callerName
     : "";
+  // Tell the phone this is a call in progress (a media session with hang-up / mute buttons in the notification shade):
+  // it keeps the page treated as active while the app is in the background, so the call is less likely to go quiet.
+  useEffect(() => {
+    if (!call?.connectedAt || typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+    const session = navigator.mediaSession;
+    try {
+      let artwork = [];
+      try { artwork = [{ src: new URL(getImageURL(call.photo), window.location.href).href }]; } catch {}
+      session.metadata = new window.MediaMetadata({
+        title: callName || "Call",
+        artist: call.isVideo ? "Video Call" : "Voice Call",
+        album: "Convo",
+        artwork,
+      });
+      session.playbackState = "playing";
+    } catch {}
+    const handlers = { hangup: () => hangUp(), togglemicrophone: () => toggleTrack("audio") };
+    for (const [action, handler] of Object.entries(handlers)) {
+      try { session.setActionHandler(action, handler); } catch {}
+    }
+    return () => {
+      try { session.playbackState = "none"; session.metadata = null; } catch {}
+      for (const action of Object.keys(handlers)) {
+        try { session.setActionHandler(action, null); } catch {}
+      }
+    };
+  }, [call?.callId, call?.connectedAt, call?.isVideo, callName]);
+
+  // coming back to the app: if the phone took the microphone away while it was in the background, get it again
+  useEffect(() => {
+    if (!call?.connectedAt) return;
+    const regainMicrophone = () => {
+      if (document.visibilityState !== "visible") return;
+      const track = localStreamRef.current?.getAudioTracks?.()[0];
+      if (track && track.readyState === "ended") changeAudioInput(audioInputId);
+    };
+    document.addEventListener("visibilitychange", regainMicrophone);
+    window.addEventListener("pageshow", regainMicrophone);
+    return () => {
+      document.removeEventListener("visibilitychange", regainMicrophone);
+      window.removeEventListener("pageshow", regainMicrophone);
+    };
+  }, [call?.callId, call?.connectedAt, audioInputId]);
+
   const incomingPerson = incoming ? personFor(incoming.callerId) : null;
   const incomingName = incomingPerson?.nickname || incoming?.callerName;
   const showVideoStage = call?.isVideo && remoteEntries.length > 0;
+  // tap-to-hide only when a real picture fills the screen: the partner's video, or mine when it is the big one
+  const partnerVideoOn = remoteEntries.some(([id]) => !remoteMedia[id]?.cameraOff);
+  const canHideControls = Boolean(showVideoStage) && (localVideoExpanded ? !cameraOff : partnerVideoOn);
   const toggleVideoLayout = () => setLocalVideoExpanded((expanded) => !expanded);
 
   // The phone Back button on the call screen does what the on-screen ← does: back to the chat, call keeps going
@@ -1496,9 +1554,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           {call && (
             <div
               data-call-screen-open={callMinimized ? undefined : "true"}
-              className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""} ${callMinimized ? "is-minimized" : ""} ${localVideoExpanded ? "is-local-video-expanded" : ""} ${controlsHidden && showVideoStage ? "is-controls-hidden" : ""}`}
+              className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""} ${callMinimized ? "is-minimized" : ""} ${localVideoExpanded ? "is-local-video-expanded" : ""} ${controlsHidden && canHideControls ? "is-controls-hidden" : ""}`}
               onClick={(event) => {
-                if (callMinimized || !showVideoStage || event.target.closest("button,input,select,label,a,[role=button],[role=menuitem]")) return;
+                if (callMinimized || !canHideControls || event.target.closest("button,input,select,label,a,[role=button],[role=menuitem]")) return;
                 setControlsHidden((h) => !h);
                 setAudioMenuOpen(false);
               }}
@@ -1661,7 +1719,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                           {microphones.length > 1 && (
                             <label className="call-microphone-picker">
                               <span><FiMic /> Microphone</span>
-                              <select value={audioInputId} onChange={(event) => changeAudioInput(event.target.value)}>
+                              <select value={activeMicId} onChange={(event) => changeAudioInput(event.target.value)}>
                                 <option value="">Default</option>
                                 {microphones.map((device, index) => (
                                   <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>
@@ -1786,11 +1844,17 @@ function RemoteAudio({ stream }) {
         } else if (error?.name !== "AbortError") console.error("Unable to resume call audio:", error);
       });
     };
+    // the phone paused the call audio (app in the background, another app took the sound): start it again
+    const keepPlaying = () => {
+      if (stream && audio.srcObject && stream.active) audio.play().catch(() => {});
+    };
     audio.addEventListener("canplay", resumePlayback);
+    audio.addEventListener("pause", keepPlaying);
     document.addEventListener("visibilitychange", resumePlayback);
     window.addEventListener("pageshow", resumePlayback);
     resumePlayback();
     return () => {
+      audio.removeEventListener("pause", keepPlaying);
       audio.removeEventListener("canplay", resumePlayback);
       document.removeEventListener("visibilitychange", resumePlayback);
       window.removeEventListener("pageshow", resumePlayback);

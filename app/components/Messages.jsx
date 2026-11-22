@@ -6,6 +6,7 @@ import { AuthContext } from "../contexts/AuthContext";
 import { UserContext } from "../contexts/UserContext";
 import { toast } from "sonner";
 import { MessageContext } from "../contexts/MessageContext";
+import useBackToClose from "../helpers/useBackToClose";
 
 const socket = socket_connection();
 const quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
@@ -37,6 +38,9 @@ const Messages = () => {
   const [callDeleteMode, setCallDeleteMode] = useState("for-me");
   const [deletingCall, setDeletingCall] = useState(false);
   const [editingMessage, setEditingMessage] = useState(null);
+  useBackToClose(deleteConfirmationOpen, () => setDeleteConfirmationOpen(false));
+  useBackToClose(callDeleteConfirmationOpen, () => setCallDeleteConfirmationOpen(false));
+  useBackToClose(Boolean(editingMessage), () => setEditingMessage(null));
   const [editText, setEditText] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const messagesRef = useRef(messages);

@@ -331,6 +331,8 @@ const Home = () => {
         return;
       }
       if (document.querySelector("[data-call-screen-open]")) return;
+      // an open dialog takes this Back itself (it closes)
+      if ((window.__convoModalDepth || 0) > 0) return;
       if (allowAppExitRef.current || event.state?.convoChat || event.state?.nicknamesDialog) return;
       if (selectedConversationRef.current?._id) {
         setUser("");

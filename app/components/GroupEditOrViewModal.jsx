@@ -13,8 +13,10 @@ import {
 } from "../helpers/helper";
 import ValidationError from "./ValidationError";
 import Swal from "sweetalert2";
+import useBackToClose from "../helpers/useBackToClose";
 const socket = socket_connection();
 const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
+  useBackToClose(Boolean(isOpen && data), onClose);
   const {
     register,
     handleSubmit,

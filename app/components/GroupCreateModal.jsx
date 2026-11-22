@@ -5,8 +5,10 @@ import { toast } from "sonner";
 import { auth, causer_id, getImageURL, socket_connection } from "../helpers/helper";
 import { setCookie } from "cookies-next";
 import { AuthContext } from "../contexts/AuthContext";
+import useBackToClose from "../helpers/useBackToClose";
 const socket = socket_connection();
 const GroupCreateModal = ({ isOpen, onClose }) => {
+  useBackToClose(isOpen, onClose);
   if (!isOpen) return null;
   const {
     register,

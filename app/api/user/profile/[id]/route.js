@@ -93,7 +93,11 @@ export async function GET(request, content) {
     if (!sessionUserId) return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
     if (!mongoose.isValidObjectId(id)) return NextResponse.json({ success: false, message: "Invalid user." }, { status: 400 });
     await mongoDB_connect();
-    const data = await userSchema.findById(id, { name: 1, photo: 1, lastSeenAt: 1 });
+    // other people's contact details stay private: only the person themselves gets their phone, email and address
+    const projection = id === sessionUserId
+      ? { name: 1, photo: 1, lastSeenAt: 1, phone: 1, email: 1, address: 1 }
+      : { name: 1, photo: 1, lastSeenAt: 1 };
+    const data = await userSchema.findById(id, projection);
     if (!data) return NextResponse.json({ success: false, message: "User not found." }, { status: 404 });
     return NextResponse.json({ success: true, data });
 }

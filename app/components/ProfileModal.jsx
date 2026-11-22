@@ -5,8 +5,10 @@ import { toast } from "sonner";
 import { auth, getImageURL, setAuthProfile, socket_connection } from "../helpers/helper";
 import { AuthContext } from "../contexts/AuthContext";
 import TwoFactorSettings from "./TwoFactorSettings";
+import useBackToClose from "../helpers/useBackToClose";
 const socket = socket_connection();
 const ProfileModal = ({ isOpen, onClose }) => {
+  useBackToClose(isOpen, onClose);
   const {
     register,
     handleSubmit,
@@ -88,6 +90,24 @@ const ProfileModal = ({ isOpen, onClose }) => {
     if (!isOpen) return;
     loadData();
   }, [isOpen, user]);
+
+  // the sign-in response carries no address, so the saved profile is fetched fresh each time the form opens
+  useEffect(() => {
+    if (!isOpen) return;
+    const id = auth()?._id;
+    if (!id) return;
+    let cancelled = false;
+    fetch(`api/user/profile/${id}`, { cache: "no-store" })
+      .then((response) => response.json())
+      .then((result) => {
+        if (cancelled || !result?.success) return;
+        setValue("name", result.data.name ?? "");
+        setValue("phone", result.data.phone ?? "");
+        setValue("address", result.data.address ?? "");
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isOpen]);
 
   const loadData = () => {
     setValue("name", user?.name);

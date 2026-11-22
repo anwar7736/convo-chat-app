@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { FiArrowLeft, FiBell, FiBellOff, FiDownload, FiFile, FiImage, FiLink, FiMusic, FiSearch, FiSmile, FiUser, FiVideo, FiX } from "react-icons/fi";
 import { toast } from "sonner";
 import NicknamesModal from "./NicknamesModal";
+import useBackToClose from "../helpers/useBackToClose";
 
 const mediaCategories = [
   { id: "photos", label: "Photos" },
@@ -25,6 +26,9 @@ export default function ConversationMenu({ conversation, onViewContact }) {
   const [mediaItems, setMediaItems] = useState([]);
   const [mediaCategory, setMediaCategory] = useState("photos");
   const [mediaPreview, setMediaPreview] = useState(null);
+  useBackToClose(mediaOpen, () => { setMediaOpen(false); setMediaPreview(null); });
+  useBackToClose(Boolean(mediaPreview), () => setMediaPreview(null));
+  useBackToClose(searchOpen, () => setSearchOpen(false));
   const [loadingMedia, setLoadingMedia] = useState(false);
   const [muted, setMuted] = useState(false);
   const [savingMute, setSavingMute] = useState(false);

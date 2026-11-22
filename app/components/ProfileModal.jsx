@@ -46,6 +46,9 @@ const ProfileModal = ({ isOpen, onClose }) => {
           message: `${user.name} updated their profile.`,
         }));
         setAuthProfile(res.data);
+        window.dispatchEvent(new CustomEvent("chat:profile-saved", {
+          detail: { _id: res.data._id, name: res.data.name, photo: res.data.photo },
+        }));
         setUser(auth());
         onClose();
         toast.success(res.message);

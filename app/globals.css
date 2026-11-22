@@ -1594,8 +1594,8 @@ form:has(> .print-container),
 }
 
 .call-camera-off-content .call-avatar {
-  width: clamp(112px, 26vw, 176px);
-  height: clamp(112px, 26vw, 176px);
+  width: min(62vw, 230px);
+  height: min(62vw, 230px);
   margin: 0;
 }
 
@@ -2743,4 +2743,48 @@ body:has(.call-screen.is-minimized) .chat-shell {
 .call-screen.has-video:not(:has(.call-stage.is-grid)) .call-hero .call-name,
 .call-stage:not(.is-grid) .call-tile > span:not(.call-tile-muted) {
   display: none;
+}
+
+/* the partner's small card with their camera off: just their picture, a little smaller, no name */
+.call-stage.is-inset .call-camera-off-content {
+  gap: 0;
+  padding: 0;
+}
+.call-stage.is-inset .call-camera-off-content strong,
+.call-stage.is-inset .call-camera-off-content span {
+  display: none;
+}
+.call-stage.is-inset .call-camera-off-content .call-avatar {
+  width: clamp(56px, 16vw, 120px);
+  height: clamp(56px, 16vw, 120px);
+}
+
+/* the call buttons sit in one evenly spaced row, whether there are four or five of them (no empty cell in the middle) */
+.call-actions:not(.is-incoming) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-around;
+  gap: 0;
+}
+.call-actions:not(.is-incoming) > .call-action {
+  min-width: 0;
+  flex: 1 1 0;
+}
+@media (max-width: 360px) {
+  .call-actions:not(.is-incoming) .call-round {
+    width: 52px;
+    height: 52px;
+    font-size: 20px;
+  }
+}
+
+/* "Video Call" and the timer stay readable on top of a bright picture */
+.call-hero.is-compact .call-kind,
+.call-hero.is-compact .call-status {
+  border-radius: 999px;
+  background: rgb(7 11 20 / 58%);
+  padding: 3px 14px;
+  color: #fff;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
 }

@@ -46,8 +46,11 @@ const Sidebar = ({
       // and this tab leaves for sure, so nobody keeps seeing it online until a reload
       activeSocket?.disconnect();
       clearAuthProfile();
+      // leave the chat page for the sign-in page without a reload; the signed-in user in context is not
+      // emptied first, so the chat is never drawn again as signed out (the next sign-in replaces it)
       window.__convoLoggingOut = true;
-      window.location.replace("/auth");
+      router.replace("/auth");
+      setTimeout(() => { window.__convoLoggingOut = false; }, 3000);
     } catch (error) {
       toast.error(error.message || "Unable to sign out.");
     }

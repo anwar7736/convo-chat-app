@@ -21,6 +21,7 @@ import {
   playMessageReminder,
   socket_connection,
 } from "./helpers/helper";
+import { draftKey, getDraft, setDraft } from "./helpers/drafts";
 let socket = socket_connection();
 
 // must match the upload route (Vercel accepts request bodies up to about 4.5 MB)
@@ -716,6 +717,36 @@ const Home = () => {
   };
 
   //load read time messages
+  // a person's new name / photo reaches the list, the open chat header and the message avatars at once
+  const applyUserUpdate = useCallback((data) => {
+    if (!data?._id) return;
+    const same = (id) => String(id) === String(data._id);
+    const nameFor = (item) => (item?.is_self ? `${data.name} (You)` : data.name);
+    setUsers((current) => (current || []).map((item) =>
+      Number(item?.is_group) !== 1 && same(item?._id)
+        ? { ...item, name: nameFor(item), photo: data.photo }
+        : item
+    ));
+    setUser((current) =>
+      current && Number(current.is_group) !== 1 && same(current._id)
+        ? { ...current, name: nameFor(current), photo: data.photo }
+        : current
+    );
+    setMessages((current) => (current || []).map((msg) => {
+      let next = msg;
+      if (msg?.sender && same(msg.sender._id)) next = { ...next, sender: { ...msg.sender, name: data.name, photo: data.photo } };
+      if (msg?.receiver && same(msg.receiver._id)) next = { ...next, receiver: { ...msg.receiver, name: data.name, photo: data.photo } };
+      return next;
+    }));
+  }, [setUsers, setUser, setMessages]);
+
+  // my own profile was saved in this tab: the socket does not echo it back to me
+  useEffect(() => {
+    const onSaved = (event) => applyUserUpdate(event.detail);
+    window.addEventListener("chat:profile-saved", onSaved);
+    return () => window.removeEventListener("chat:profile-saved", onSaved);
+  }, [applyUserUpdate]);
+
   const loadRealTimeMessages = () => {
     socket.off("private-message");
     socket.on("private-message", async (data) => {
@@ -797,29 +828,7 @@ const Home = () => {
 
     socket.off("user-updated");
     socket.on("user-updated", (data) => {
-      //update users
-      let userList = [...users];
-      let index = userList.findIndex((user) => user?._id == data?._id);
-      if (index >= 0) {
-        userList[index].name = data?.name;
-        userList[index].photo = data?.photo;
-        setUsers(userList);
-      }
-
-      //update messages
-      let filterMessages = [...(messages || [])];
-      let sender = "";
-      filterMessages = filterMessages.map((msg) => {
-        sender = msg?.sender?.[0];
-        if (sender && sender?._id === data?._id) {
-          sender.name = data?.name;
-          sender.photo = data?.photo;
-        }
-
-        return msg;
-      });
-
-      setMessages(filterMessages);
+      applyUserUpdate(data);
       // let the call screen react to live profile changes
       window.dispatchEvent(new CustomEvent("chat:user-updated", { detail: data }));
       if (data?._id !== authUser?._id) {
@@ -984,6 +993,42 @@ const Home = () => {
   useEffect(() => {
     setReplyTarget(null);
   }, [user?._id]);
+
+  // reading a conversation clears its notifications from the tray, so the icon count follows what is still unread
+  useEffect(() => {
+    if (!user?._id || typeof navigator === "undefined" || !navigator.serviceWorker) return;
+    const clearChatNotifications = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const shown = await registration.getNotifications();
+        shown
+          .filter((item) => item.data?.ticket === String(user._id) && item.data?.isGroup === (Number(user.is_group) === 1 ? 1 : 0))
+          .forEach((item) => item.close());
+      } catch {
+        // notifications are not available here: nothing to clear
+      }
+    };
+    clearChatNotifications();
+    document.addEventListener("visibilitychange", clearChatNotifications);
+    return () => document.removeEventListener("visibilitychange", clearChatNotifications);
+  }, [user?._id, user?.is_group]);
+
+  // drafts: each conversation keeps its own unsent text; opening a conversation brings its draft back
+  useEffect(() => {
+    if (!user?._id) return;
+    setMessage(getDraft(draftKey(authUser?._id, user)));
+  }, [user?._id, user?.is_group]);
+  useEffect(() => {
+    if (!user?._id || !authUser?._id) return;
+    setDraft(draftKey(authUser._id, user), message);
+  }, [message]);
+  useEffect(() => {
+    const box = messageInputRef.current;
+    if (!box) return;
+    box.style.height = "auto";
+    box.style.height = Math.min(box.scrollHeight, 140) + "px";
+  }, [message, user?._id]);
 
   // Phone camera photos are usually 3-12 MB, more than the server accepts (about 4 MB on Vercel):
   // every photo that is large, or in a format the server does not take (HEIC …), becomes a JPEG of at most 1920 px.

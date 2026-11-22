@@ -76,10 +76,9 @@ self.addEventListener("push", (event) => {
       badge: "/icons/icon.svg",
       silent: false,
       tag: payload.tag || "convo-message",
-      renotify: true,          // a new message in the same chat buzzes again
       vibrate: [120, 60, 120],
       timestamp: Date.now(),
-      data: { url: payload.url || "/" },
+      data: { url: payload.url || "/", ticket: payload.ticket || "", isGroup: payload.isGroup ? 1 : 0 },
     });
   })());
 });
@@ -88,9 +87,19 @@ self.addEventListener("push", (event) => {
 // (Signed out: the app sends the user to sign in and back to this chat afterwards.)
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  const opened = event.notification.data || {};
+  // opening a chat clears every notification of that chat, not just the one tapped
+  const closeSameChat = async () => {
+    if (!opened.ticket) return;
+    const all = await self.registration.getNotifications();
+    all
+      .filter((item) => item.data?.ticket === opened.ticket && item.data?.isGroup === opened.isGroup)
+      .forEach((item) => item.close());
+  };
   const target = new URL(event.notification.data?.url || "/", self.location.origin);
   if (target.origin !== self.location.origin) return;
   event.waitUntil((async () => {
+    await closeSameChat();
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     const client = windows.find((item) => new URL(item.url).origin === self.location.origin);
     if (client) {

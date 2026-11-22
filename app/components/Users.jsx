@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { UserContext } from "../contexts/UserContext";
 import { MessageContext } from "../contexts/MessageContext";
 import { activityFormat, getImageURL, loadConversationTimeline, socket_connection } from "../helpers/helper";
+import { draftKey, getAllDrafts } from "../helpers/drafts";
 import { UserListContext } from "../contexts/UserListContext";
 
 const conversationDateLabel = (value) => {
@@ -46,6 +47,13 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
   const [menuFor, setMenuFor] = useState(null);
   const [liveCall, setLiveCall] = useState(() => (typeof window !== "undefined" ? window.__convoLiveCall || null : null));
   const [typingByChat, setTypingByChat] = useState({});
+  const [drafts, setDrafts] = useState({});
+  useEffect(() => {
+    const load = () => setDrafts(getAllDrafts());
+    load();
+    window.addEventListener("chat:drafts-changed", load);
+    return () => window.removeEventListener("chat:drafts-changed", load);
+  }, []);
   const meIdRef = useRef("");
   meIdRef.current = String(authUser?._id || "");
   useEffect(() => {
@@ -248,6 +256,9 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
             : isCallPreview
             ? callLabel
             : mediaPreview?.text || contact?.last_message || "";
+          const draftText = drafts[draftKey(authUser?._id, contact)] || "";
+          const isOpenChat = String(contact?._id) === String(user?._id) && Number(contact?.is_group) === Number(user?.is_group);
+          const showDraft = Boolean(draftText.trim()) && !isTyping && !inCall && !isOpenChat;
           const preferenceKey = `${contact?.is_group ? "group" : "user"}:${contact?._id}`;
           return (
             <div
@@ -282,7 +293,12 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                       <span className="ml-2 shrink-0 rounded-full bg-indigo-500 px-2 py-0.5 text-xs text-white">{contact.pending}</span>
                     )}
                   </div>
-                  {preview && (
+                  {showDraft ? (
+                    <p className="mt-1 flex items-center gap-1 truncate text-xs text-[#c7d2e3]">
+                      <span className="shrink-0 font-semibold text-emerald-400">Draft:</span>
+                      <span className="truncate">{draftText.replace(/\s+/g, " ").trim()}</span>
+                    </p>
+                  ) : preview && (
                     <p className={`mt-1 flex items-center gap-1 truncate text-xs ${isTyping ? "text-emerald-400" : isMissedCall ? "text-rose-300" : "text-[#c7d2e3]"}`}>
                       {!inCall && mine && (contact?.last_message_status > 0
                         ? <MdDoneAll className="shrink-0 text-indigo-300" aria-label="Seen" />
@@ -296,11 +312,14 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                           aria-hidden="true"
                         />
                       )}
-                      <span className="truncate">{preview}</span>
+                      <span className={`truncate ${inCall ? "text-emerald-400" : ""}`}>{preview}</span>
                       {!isTyping && inCall && (
-                        <span className="shrink-0 font-semibold text-emerald-400">
-                          {liveCall.phase === "connected" ? "In Call" : liveCall.phase === "ringing" ? "Ringing…" : "Calling…"}
-                        </span>
+                        <>
+                          <span className="shrink-0">·</span>
+                          <span className="shrink-0">
+                            {liveCall.phase === "connected" ? "In Call" : liveCall.phase === "ringing" ? "Ringing…" : "Calling…"}
+                          </span>
+                        </>
                       )}
                     </p>
                   )}

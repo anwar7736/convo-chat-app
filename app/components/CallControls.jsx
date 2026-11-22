@@ -267,6 +267,23 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     }
   };
 
+  // while a call is connected, tell the server every 20 s that it is still running (silently: a missed ping is harmless)
+  useEffect(() => {
+    if (!call?.connectedAt) return;
+    const callId = call.callId;
+    const ping = () => {
+      fetch("/api/calls/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callId, action: "ping" }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+    ping();
+    const timer = setInterval(ping, 20000);
+    return () => clearInterval(timer);
+  }, [call?.callId, call?.connectedAt]);
+
   const loadCallHistory = useCallback(() => {
     window.dispatchEvent(new Event("chat:refresh-call-logs"));
   }, []);
@@ -383,6 +400,10 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     return true;
   };
 
+  // the picker lists real microphones only (not the browser's "default" / "communications" aliases)
+  const microphones = audioDevices.filter((device) =>
+    device.kind === "audioinput" && device.deviceId !== "default" && device.deviceId !== "communications");
+
   const changeAudioRoute = async (route) => {
     const outputs = audioDevices.filter((device) => device.kind === "audiooutput");
     const matches = {
@@ -398,26 +419,16 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     if (!device && route === "bluetooth" && navigator.mediaDevices?.selectAudioOutput) {
       try {
         device = await navigator.mediaDevices.selectAudioOutput();
-      } catch (error) {
-        if (error?.name !== "NotAllowedError" && error?.name !== "AbortError") {
-          toast.error(error.message || "Unable to choose a Bluetooth audio device.");
-        }
-        return;
+      } catch {
+        return; // nothing chosen: no message
       }
     }
 
     if (device) {
       const applied = await changeAudioOutput(device.deviceId);
-      if (!applied) {
-        toast.info("This browser does not support selecting call audio output. Change it in your device audio settings.");
-        return;
-      }
-    } else if (route !== "speaker") {
-      toast.info(`${route === "earpiece" ? "Earpiece" : "Bluetooth"} routing is not available in this browser. Use your device audio controls.`);
-      return;
-    } else if (outputs.length) {
-      toast.info("This browser controls call audio through your device audio settings.");
-      return;
+      if (!applied) return;
+    } else if (route !== "speaker" || outputs.length) {
+      return; // this browser cannot route to it: nothing happens, no message
     }
 
     // the microphone follows the chosen route: a Bluetooth headset mic for Bluetooth, the phone's own mic otherwise
@@ -1485,9 +1496,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           {call && (
             <div
               data-call-screen-open={callMinimized ? undefined : "true"}
-              className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""} ${callMinimized ? "is-minimized" : ""} ${localVideoExpanded ? "is-local-video-expanded" : ""} ${controlsHidden ? "is-controls-hidden" : ""}`}
+              className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""} ${callMinimized ? "is-minimized" : ""} ${localVideoExpanded ? "is-local-video-expanded" : ""} ${controlsHidden && showVideoStage ? "is-controls-hidden" : ""}`}
               onClick={(event) => {
-                if (callMinimized || event.target.closest("button,input,select,label,a,[role=button],[role=menuitem]")) return;
+                if (callMinimized || !showVideoStage || event.target.closest("button,input,select,label,a,[role=button],[role=menuitem]")) return;
                 setControlsHidden((h) => !h);
                 setAudioMenuOpen(false);
               }}
@@ -1647,6 +1658,17 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                               {audioRoute === id && <FiCheck className="call-audio-check" />}
                             </button>
                           ))}
+                          {microphones.length > 1 && (
+                            <label className="call-microphone-picker">
+                              <span><FiMic /> Microphone</span>
+                              <select value={audioInputId} onChange={(event) => changeAudioInput(event.target.value)}>
+                                <option value="">Default</option>
+                                {microphones.map((device, index) => (
+                                  <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
                         </div>
                       )}
                     </div>

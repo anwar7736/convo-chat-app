@@ -10,6 +10,7 @@ import { groupMemberSchema } from "@/app/models/groupMemberModel";
 import { userSchema } from "@/app/models/userModel";
 
 const objectIdPattern = /^[a-f\d]{24}$/i;
+const CALL_PING_TIMEOUT_MS = 3 * 60 * 1000; // background tabs may only tick about once a minute
 const callIdPattern = /^[a-f\d-]{36}$/i;
 
 function createCallLogEvent(log, actorId) {
@@ -56,6 +57,26 @@ export async function GET(request) {
     if (conversationId) query.conversationId = new mongoose.Types.ObjectId(conversationId);
     if (isGroup !== null) query.isGroup = isGroup === "1";
   }
+  // an answered call nobody has pinged for a while was cut off (app closed, phone off): close it now
+  const staleBefore = new Date(Date.now() - CALL_PING_TIMEOUT_MS);
+  await callLogSchema.updateMany(
+    {
+      participants: userObjectId,
+      status: "answered",
+      endedAt: { $exists: false },
+      answeredAt: { $lt: staleBefore },
+      $or: [{ lastPingAt: { $lt: staleBefore } }, { lastPingAt: { $exists: false } }],
+    },
+    [{
+      $set: {
+        status: "ended",
+        endedAt: { $ifNull: ["$lastPingAt", "$answeredAt"] },
+        durationSeconds: {
+          $max: [0, { $floor: { $divide: [{ $subtract: [{ $ifNull: ["$lastPingAt", "$answeredAt"] }, "$answeredAt"] }, 1000] } }],
+        },
+      },
+    }]
+  );
   const readResult = await callLogSchema.updateMany(
     {
       ...query,
@@ -143,7 +164,7 @@ export async function POST(request) {
   }
   const action = body?.action;
   const callId = String(body?.callId || "");
-  if (!callIdPattern.test(callId) || !["start", "answered", "ended", "no-answer", "declined", "upgrade-video"].includes(action)) {
+  if (!callIdPattern.test(callId) || !["start", "answered", "ended", "no-answer", "declined", "upgrade-video", "ping"].includes(action)) {
     return NextResponse.json({ success: false, message: "Invalid call log update." }, { status: 400 });
   }
 
@@ -215,6 +236,14 @@ export async function POST(request) {
 
   const log = await callLogSchema.findOne({ callId, participants: userObjectId });
   if (!log) return NextResponse.json({ success: false, message: "Call not found." }, { status: 404 });
+  if (action === "ping") {
+    // an answered call is still running: the person's app says so every few seconds
+    await callLogSchema.updateOne(
+      { callId, participants: userObjectId, endedAt: { $exists: false }, status: "answered" },
+      { $set: { lastPingAt: new Date() } }
+    );
+    return NextResponse.json({ success: true });
+  }
   if (action === "upgrade-video") {
     await callLogSchema.updateOne(
       { callId, participants: userObjectId, deletedForEveryone: { $ne: true } },

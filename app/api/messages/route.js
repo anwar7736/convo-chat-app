@@ -372,7 +372,10 @@ export async function POST(request) {
     title: isGroup ? `${senderName} @ ${groupInfo?.name || "Group"}` : senderName,
     body: notificationBody.slice(0, 180),
     url: `/?ticket=${encodeURIComponent(ticketId)}&is_group=${isGroup ? "1" : "0"}`,
-    tag: `message-${ticketId}`,
+    // one notification per message (so the launcher can count them); ticket says which chat it belongs to
+    tag: `message-${ticketId}-${message._id}`,
+    ticket: String(ticketId),
+    isGroup: isGroup ? 1 : 0,
     badge: unreadByUser.get(recipientId) || 0,
   })).catch((error) => console.error("Unable to prepare a Web Push notification:", error));
   });

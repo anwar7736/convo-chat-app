@@ -11,6 +11,7 @@ const callLogModel = new mongoose.Schema({
   startedAt: { type: Date, default: Date.now },
   answeredAt: Date,
   endedAt: Date,
+  lastPingAt: Date,
   durationSeconds: { type: Number, default: 0 },
   readBy: [{ type: mongoose.Schema.Types.ObjectId }],
   deletedFor: [{ type: mongoose.Schema.Types.ObjectId }],

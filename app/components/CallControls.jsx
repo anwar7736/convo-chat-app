@@ -222,7 +222,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const stopCall = useCallback((notify = true) => {
     const active = callRef.current;
     const setup = callSetupRef.current;
-    if (setup?.callId === active?.callId) {
+    if (setup && setup.callId === active?.callId) {
       setup.cancel();
       callSetupRef.current = null;
     }

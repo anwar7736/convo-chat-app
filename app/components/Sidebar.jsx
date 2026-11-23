@@ -27,29 +27,26 @@ const Sidebar = ({
   const [activeTab, setActiveTab] = useState("chats"); // "chats" | "calls" | "archived"
   const sectionRef = useRef(null);
   const touchStartXRef = useRef(null);
-  const tabHistoryPushedRef = useRef(false);
+  const touchStartYRef = useRef(null);
   const router = useRouter();
 
-  // Android back button: Calls/Archived → Chats
+  // Android back button: always keep a guard history entry so back never triggers
+  // the app-close confirmation. When on Calls/Archived, back goes to Chats and
+  // re-pushes the guard. When on Chats, back is absorbed (guard re-pushed, no action).
   useEffect(() => {
-    if (activeTab === "chats") {
-      // if we pushed a sidebar history entry and the user clicked Chats directly (not via back),
-      // pop it now so a subsequent back press doesn't trigger an unexpected popstate
-      if (tabHistoryPushedRef.current) {
-        tabHistoryPushedRef.current = false;
-        window.__convoIgnoreNextPop = true;
-        window.history.back();
-      }
-      return;
-    }
-    if (!tabHistoryPushedRef.current) {
-      tabHistoryPushedRef.current = true;
-      window.history.pushState({ chatSidebarTab: true }, "");
-    }
+    window.history.pushState({ sidebarGuard: true }, "");
+  }, []);
+
+  useEffect(() => {
+    setSearch("");
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     const onPop = () => {
       if (window.__convoIgnoreNextPop) { window.__convoIgnoreNextPop = false; return; }
-      tabHistoryPushedRef.current = false;
-      setActiveTab("chats");
+      if (activeTab !== "chats") setActiveTab("chats");
+      // always re-push guard so the next back press is also absorbed
+      window.history.pushState({ sidebarGuard: true }, "");
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -219,12 +216,18 @@ const Sidebar = ({
     };
   }, []);
   const TABS = ["chats", "calls", "archived"];
-  const handleTouchStart = (e) => { touchStartXRef.current = e.touches[0].clientX; };
+  const handleTouchStart = (e) => {
+    touchStartXRef.current = e.touches[0].clientX;
+    touchStartYRef.current = e.touches[0].clientY;
+  };
   const handleTouchEnd = (e) => {
     if (touchStartXRef.current === null) return;
     const dx = e.changedTouches[0].clientX - touchStartXRef.current;
+    const dy = e.changedTouches[0].clientY - touchStartYRef.current;
     touchStartXRef.current = null;
+    touchStartYRef.current = null;
     if (Math.abs(dx) < 50) return;
+    if (Math.abs(dy) > Math.abs(dx)) return; // vertical scroll — not a tab swipe
     const idx = TABS.indexOf(activeTab);
     if (dx < 0 && idx < TABS.length - 1) setActiveTab(TABS[idx + 1]);
     if (dx > 0 && idx > 0) setActiveTab(TABS[idx - 1]);
@@ -351,13 +354,13 @@ const Sidebar = ({
               </div>
             </div>
           )}
-          {activeTab === "chats" && (
+          {(activeTab === "chats" || activeTab === "archived") && (
             <div className="flex justify-between">
               <input
                 type="text"
                 className="form-control mb-5"
-                placeholder="Search conversations"
-                aria-label="Search conversations"
+                placeholder={activeTab === "archived" ? "Search archived" : "Search conversations"}
+                aria-label={activeTab === "archived" ? "Search archived" : "Search conversations"}
                 onChange={(e) => setSearch(e.target.value)}
                 value={search}
               />

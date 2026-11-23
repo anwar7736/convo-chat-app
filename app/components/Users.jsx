@@ -87,6 +87,22 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading, sh
   const setShowArchived = showArchivedProp !== undefined ? () => {} : setShowArchivedInternal;
   const menuRef = useRef(null);
   const requestIdRef = useRef(0);
+  const [visibleCount, setVisibleCount] = useState(10);
+  const sentinelRef = useRef(null);
+
+  // reset pagination when switching tabs
+  useEffect(() => { setVisibleCount(10); }, [showArchived]);
+
+  // infinite scroll
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) setVisibleCount((n) => n + 10);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [visibleCount, showArchived, (users || []).length]);
 
   useEffect(() => {
     if (!menuFor) return;
@@ -210,7 +226,7 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading, sh
           <span className="sr-only">Loading conversations...</span>
         </div>
       ) : (
-        visibleUsers.length > 0 ? visibleUsers.map((contact) => {
+        visibleUsers.length > 0 ? visibleUsers.slice(0, visibleCount).map((contact) => {
           const isActive = activeUsers.includes(String(contact?._id));
           const activityDate = conversationDateLabel(contact?.last_activity);
           const isCallPreview = contact?.last_activity_kind === "call";
@@ -379,6 +395,9 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading, sh
             {showArchived ? "No archived conversations." : "No conversations found."}
           </small>
         )
+      )}
+      {visibleCount < visibleUsers.length && (
+        <div ref={sentinelRef} className="h-2" />
       )}
     </div>
   );

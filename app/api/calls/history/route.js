@@ -97,20 +97,28 @@ export async function GET(request) {
     const groupIds = [...new Set(
       enriched.filter((l) => l.isGroup).map((l) => String(l.conversationId)).filter(Boolean)
     )];
-    const [users, groups] = await Promise.all([
+    const [users, groups, authUserDoc] = await Promise.all([
       directIds.length
-        ? userSchema.find({ _id: { $in: directIds } }).select("name nickname photo email phone").lean()
+        ? userSchema.find({ _id: { $in: directIds } }).select("name photo email phone").lean()
         : Promise.resolve([]),
       groupIds.length
         ? (await import("@/app/models/groupModel")).groupSchema
             .find({ _id: { $in: groupIds } }).select("name photo").lean()
         : Promise.resolve([]),
+      directIds.length
+        ? userSchema.findById(userObjectId).select("nicknames").lean()
+        : Promise.resolve(null),
     ]);
+    const myNicknames = authUserDoc?.nicknames instanceof Map
+      ? Object.fromEntries(authUserDoc.nicknames)
+      : authUserDoc?.nicknames || {};
     const userMap = Object.fromEntries(users.map((u) => [String(u._id), u]));
     const groupMap = Object.fromEntries(groups.map((g) => [String(g._id), g]));
     enriched = enriched.map((log) => {
       const info = log.isGroup ? groupMap[String(log.conversationId)] : userMap[String(log.conversationId)];
-      return info ? { ...log, name: info.nickname || info.name, photo: info.photo, nickname: info.nickname, email: info.email, phone: info.phone } : log;
+      if (!info) return log;
+      const nickname = !log.isGroup ? (myNicknames[String(log.conversationId)] || "") : "";
+      return { ...log, name: nickname || info.name, photo: info.photo, nickname, email: info.email, phone: info.phone };
     });
   }
   return NextResponse.json({

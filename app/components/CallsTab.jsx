@@ -30,7 +30,9 @@ export default function CallsTab({ setConversationLoading, onOpenConversation })
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [visibleCount, setVisibleCount] = useState(10);
   const requestIdRef = useRef(0);
+  const sentinelRef = useRef(null);
 
   const fetchLogs = useCallback(async () => {
     try {
@@ -51,6 +53,20 @@ export default function CallsTab({ setConversationLoading, onOpenConversation })
     window.addEventListener("chat:refresh-call-logs", onRefresh);
     return () => window.removeEventListener("chat:refresh-call-logs", onRefresh);
   }, [fetchLogs]);
+
+  // reset visible count when search changes
+  useEffect(() => { setVisibleCount(10); }, [search]);
+
+  // infinite scroll sentinel
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) setVisibleCount((n) => n + 10);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [visibleCount, logs.length, search]);
 
   // group consecutive calls with the same person into one row (count badge)
   const grouped = (() => {
@@ -163,7 +179,7 @@ export default function CallsTab({ setConversationLoading, onOpenConversation })
             {search ? "No calls found." : "No recent calls."}
           </p>
         ) : (
-          grouped.map((log) => {
+          grouped.slice(0, visibleCount).map((log) => {
             const outgoing = String(log.callerId) === String(authUser?._id);
             const isMissed = log.status === "no-answer" && !outgoing;
             const CallIcon = isMissed ? FiPhoneMissed : log.isVideo ? FiVideo : outgoing ? FiPhoneOutgoing : FiPhoneIncoming;
@@ -213,6 +229,9 @@ export default function CallsTab({ setConversationLoading, onOpenConversation })
               </div>
             );
           })
+        )}
+        {visibleCount < grouped.length && (
+          <div ref={sentinelRef} className="h-2" />
         )}
       </div>
     </div>

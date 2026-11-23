@@ -22,6 +22,7 @@ import {
   socket_connection,
 } from "./helpers/helper";
 import { draftKey, getDraft, setDraft } from "./helpers/drafts";
+import { afterHistorySettles } from "./helpers/useBackToClose";
 let socket = socket_connection();
 
 // must match the upload route (Vercel accepts request bodies up to about 4.5 MB)
@@ -356,7 +357,9 @@ const Home = () => {
   useEffect(() => {
     const hasConversation = Boolean(user?._id);
     if (hasConversation && !conversationHistoryRef.current) {
-      window.history.pushState({ convoChat: true }, "", window.location.href);
+      afterHistorySettles(() =>
+        window.history.pushState({ convoChat: true }, "", window.location.href)
+      );
     }
     conversationHistoryRef.current = hasConversation;
   }, [user?._id, user?.is_group]);

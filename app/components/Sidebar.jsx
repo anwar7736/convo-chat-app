@@ -12,6 +12,7 @@ import GroupCreateModal from "./GroupCreateModal";
 import ProfileModal from "./ProfileModal";
 import Users from "./Users";
 import CallsTab from "./CallsTab";
+import useBackToClose from "../helpers/useBackToClose";
 let socket = socket_connection();
 
 const Sidebar = ({
@@ -30,27 +31,12 @@ const Sidebar = ({
   const touchStartYRef = useRef(null);
   const router = useRouter();
 
-  // Android back button: always keep a guard history entry so back never triggers
-  // the app-close confirmation. When on Calls/Archived, back goes to Chats and
-  // re-pushes the guard. When on Chats, back is absorbed (guard re-pushed, no action).
-  useEffect(() => {
-    window.history.pushState({ sidebarGuard: true }, "");
-  }, []);
+  // Calls/Archived behave like a dialog layer: phone Back returns to Chats instead of the exit prompt
+  useBackToClose(activeTab !== "chats", () => setActiveTab("chats"));
 
   useEffect(() => {
     setSearch("");
   }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    const onPop = () => {
-      if (window.__convoIgnoreNextPop) { window.__convoIgnoreNextPop = false; return; }
-      if (activeTab !== "chats") setActiveTab("chats");
-      // always re-push guard so the next back press is also absorbed
-      window.history.pushState({ sidebarGuard: true }, "");
-    };
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, [activeTab]);
   const { user, setUser } = useContext(AuthContext);
   const [isProfileModalOpen, setProfileModalOpen] = useState(false);
   const [isAddGroupModalOpen, setAddGroupModalOpen] = useState(false);

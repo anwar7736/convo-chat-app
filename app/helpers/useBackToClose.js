@@ -1,5 +1,29 @@
 import { useEffect, useRef } from "react";
 
+// history.back() is asynchronous; anything that must push a new entry right after a dialog/tab layer is
+// dropped has to wait until that traversal has finished, or the new entry gets popped instead.
+export function dropHistoryEntry() {
+  window.__convoIgnoreNextPop = true;
+  window.__convoBackPending = true;
+  const settle = () => {
+    window.__convoBackPending = false;
+    window.removeEventListener("popstate", settle);
+    (window.__convoAfterBack || []).splice(0).forEach((fn) => fn());
+  };
+  window.addEventListener("popstate", settle);
+  window.history.back();
+}
+
+export function afterHistorySettles(fn) {
+  if (!window.__convoBackPending) { fn(); return () => {}; }
+  const queue = (window.__convoAfterBack ||= []);
+  queue.push(fn);
+  return () => {
+    const at = queue.indexOf(fn);
+    if (at >= 0) queue.splice(at, 1);
+  };
+}
+
 // While a dialog is open, the phone's Back button closes it (the top-most one, if several are open) instead of
 // leaving the chat or asking to close the app. Closing a dialog another way removes its history entry.
 export default function useBackToClose(isOpen, onClose) {
@@ -24,10 +48,7 @@ export default function useBackToClose(isOpen, onClose) {
       if (at >= 0) stack.splice(at, 1);
       window.__convoModalDepth = stack.length;
       // closed with a button (or after saving): drop our own history entry without the app reacting to it
-      if (window.history.state?.dialogDepth === depth) {
-        window.__convoIgnoreNextPop = true;
-        window.history.back();
-      }
+      if (window.history.state?.dialogDepth === depth) dropHistoryEntry();
     };
   }, [isOpen]);
 }

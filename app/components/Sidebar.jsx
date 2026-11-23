@@ -24,7 +24,7 @@ const Sidebar = ({
   className = "",
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("chats"); // "chats" | "calls"
+  const [activeTab, setActiveTab] = useState("chats"); // "chats" | "calls" | "archived"
   const sectionRef = useRef(null);
   const router = useRouter();
   const { user, setUser } = useContext(AuthContext);
@@ -270,40 +270,45 @@ const Sidebar = ({
         ) : null}
       </header>
 
-      {/* Tab strip */}
+      {/* Tab strip: Chats · Calls · Archived */}
       <div className="flex border-b border-[#263248] px-4">
-        {["chats", "calls"].map((tab) => (
+        {[["chats", "Chats"], ["calls", "Calls"], ["archived", "Archived"]].map(([key, label]) => (
           <button
-            key={tab}
+            key={key}
             type="button"
-            className={`sidebar-tab ${activeTab === tab ? "is-active" : ""}`}
-            onClick={() => setActiveTab(tab)}
+            className={`sidebar-tab ${activeTab === key ? "is-active" : ""}`}
+            onClick={() => setActiveTab(key)}
           >
-            {tab === "chats" ? "Chats" : "Calls"}
+            {label}
           </button>
         ))}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        {activeTab === "chats" ? (
-          <div className="flex flex-1 flex-col p-4">
-            {showPushBanner && (
-              <div className="push-banner mb-4" role="status">
-                <IoNotificationsOutline className="mt-0.5 shrink-0 text-lg text-indigo-300" aria-hidden="true" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-white">Get message notifications</p>
-                  <p className="mt-0.5 text-xs text-[#91a0b7]">See new messages on this device even when the app is closed.</p>
-                  <div className="mt-2 flex gap-2">
-                    <button type="button" className="rounded-lg bg-indigo-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-400" onClick={() => enableNotifications()}>
-                      Turn on
-                    </button>
-                    <button type="button" className="rounded-lg px-3 py-1.5 text-xs text-[#91a0b7] hover:bg-[#263248]" onClick={dismissPushBanner}>
-                      Not now
-                    </button>
-                  </div>
+      {activeTab === "calls" ? (
+        <CallsTab
+          setConversationLoading={setConversationLoading}
+          onOpenConversation={() => setActiveTab("chats")}
+        />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {showPushBanner && activeTab === "chats" && (
+            <div className="push-banner mb-4" role="status">
+              <IoNotificationsOutline className="mt-0.5 shrink-0 text-lg text-indigo-300" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-white">Get message notifications</p>
+                <p className="mt-0.5 text-xs text-[#91a0b7]">See new messages on this device even when the app is closed.</p>
+                <div className="mt-2 flex gap-2">
+                  <button type="button" className="rounded-lg bg-indigo-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-400" onClick={() => enableNotifications()}>
+                    Turn on
+                  </button>
+                  <button type="button" className="rounded-lg px-3 py-1.5 text-xs text-[#91a0b7] hover:bg-[#263248]" onClick={dismissPushBanner}>
+                    Not now
+                  </button>
                 </div>
               </div>
-            )}
+            </div>
+          )}
+          {activeTab === "chats" && (
             <div className="flex justify-between">
               <input
                 type="text"
@@ -317,20 +322,16 @@ const Sidebar = ({
                 <MdAdd></MdAdd>
               </button>
             </div>
-            <Users
-              activeUsers={activeUsers}
-              activityNow={activityNow}
-              isLoading={isUserListLoading}
-              setConversationLoading={setConversationLoading}
-            />
-          </div>
-        ) : (
-          <CallsTab
+          )}
+          <Users
+            activeUsers={activeUsers}
+            activityNow={activityNow}
+            isLoading={isUserListLoading}
             setConversationLoading={setConversationLoading}
-            onOpenConversation={() => setActiveTab("chats")}
+            showArchived={activeTab === "archived"}
           />
-        )}
-      </div>
+        </div>
+      )}
       <ProfileModal
         isOpen={isProfileModalOpen}
         onClose={() => setProfileModalOpen(false)}

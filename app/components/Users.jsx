@@ -38,7 +38,7 @@ const conversationDateLabel = (value) => {
   return date.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit" });
 };
 
-const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) => {
+const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading, showArchived: showArchivedProp }) => {
   const { user, setUser } = useContext(UserContext);
   const { user: authUser } = useContext(AuthContext); // the logged-in person (user above is the open chat)
   const { users, setUsers } = useContext(UserListContext);
@@ -81,7 +81,10 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
     window.addEventListener("chat:call-state", onCallState);
     return () => window.removeEventListener("chat:call-state", onCallState);
   }, []);
-  const [showArchived, setShowArchived] = useState(false);
+  // if the parent (Sidebar) controls the tab, use that; otherwise fall back to internal state
+  const [showArchivedInternal, setShowArchivedInternal] = useState(false);
+  const showArchived = showArchivedProp !== undefined ? showArchivedProp : showArchivedInternal;
+  const setShowArchived = showArchivedProp !== undefined ? () => {} : setShowArchivedInternal;
   const menuRef = useRef(null);
   const requestIdRef = useRef(0);
 
@@ -171,26 +174,28 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
 
   return (
     <div>
-      <div className="mb-3 grid grid-cols-2 gap-2" role="tablist" aria-label="Conversation folders">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={!showArchived}
-          className={`rounded-lg px-3 py-2 text-sm ${!showArchived ? "bg-[#263248] text-white" : "text-[#91a0b7] hover:bg-[#1b273b]"}`}
-          onClick={() => setShowArchived(false)}
-        >
-          Chats
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={showArchived}
-          className={`rounded-lg px-3 py-2 text-sm ${showArchived ? "bg-[#263248] text-white" : "text-[#91a0b7] hover:bg-[#1b273b]"}`}
-          onClick={() => setShowArchived(true)}
-        >
-          Archived
-        </button>
-      </div>
+      {showArchivedProp === undefined && (
+        <div className="mb-3 grid grid-cols-2 gap-2" role="tablist" aria-label="Conversation folders">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!showArchived}
+            className={`rounded-lg px-3 py-2 text-sm ${!showArchived ? "bg-[#263248] text-white" : "text-[#91a0b7] hover:bg-[#1b273b]"}`}
+            onClick={() => setShowArchived(false)}
+          >
+            Chats
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={showArchived}
+            className={`rounded-lg px-3 py-2 text-sm ${showArchived ? "bg-[#263248] text-white" : "text-[#91a0b7] hover:bg-[#1b273b]"}`}
+            onClick={() => setShowArchived(true)}
+          >
+            Archived
+          </button>
+        </div>
+      )}
       {isLoading ? (
         <div className="conversation-list-skeleton" role="status" aria-label="Loading conversations">
           {Array.from({ length: 6 }, (_, index) => (

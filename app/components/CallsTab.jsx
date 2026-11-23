@@ -143,7 +143,8 @@ export default function CallsTab({ setConversationLoading, onOpenConversation })
           <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-[#728099]" size={15} />
           <input
             type="text"
-            className="form-control pl-9 pr-8"
+            className="form-control"
+            style={{ paddingLeft: "2.25rem", paddingRight: search ? "2rem" : undefined }}
             placeholder="Search calls"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -191,7 +192,7 @@ export default function CallsTab({ setConversationLoading, onOpenConversation })
                 {/* Info */}
                 <div className="min-w-0 flex-1">
                   <p className={`truncate text-sm font-semibold ${nameColor}`}>
-                    {log.name || log.nickname || "Unknown"}{count}
+                    {log.nickname || log.name || "Unknown"}{count}
                   </p>
                   <p className={`flex items-center gap-1 text-xs ${iconColor}`}>
                     <CallIcon size={12} aria-label={dirLabel} />

@@ -32,7 +32,16 @@ const Sidebar = ({
 
   // Android back button: Calls/Archived → Chats
   useEffect(() => {
-    if (activeTab === "chats") { tabHistoryPushedRef.current = false; return; }
+    if (activeTab === "chats") {
+      // if we pushed a sidebar history entry and the user clicked Chats directly (not via back),
+      // pop it now so a subsequent back press doesn't trigger an unexpected popstate
+      if (tabHistoryPushedRef.current) {
+        tabHistoryPushedRef.current = false;
+        window.__convoIgnoreNextPop = true;
+        window.history.back();
+      }
+      return;
+    }
     if (!tabHistoryPushedRef.current) {
       tabHistoryPushedRef.current = true;
       window.history.pushState({ chatSidebarTab: true }, "");

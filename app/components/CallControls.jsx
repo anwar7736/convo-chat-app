@@ -1423,6 +1423,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     if (!callScreenOpen) return;
     window.history.pushState({ ...(window.history.state || {}), callScreen: true }, "", window.location.href);
     const onPop = () => {
+      if (window.__convoIgnoreNextPop) { window.__convoIgnoreNextPop = false; return; }
       setAudioMenuOpen(false);
       setCallMinimized(true);
     };

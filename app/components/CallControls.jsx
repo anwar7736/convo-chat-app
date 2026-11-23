@@ -338,6 +338,17 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     };
   }, [call]);
 
+  // auto-switch to Bluetooth when a BT output device connects (or is already present at call start)
+  const prevHasBtRef = useRef(false);
+  useEffect(() => {
+    if (!call) { prevHasBtRef.current = false; return; }
+    const hasBt = audioDevices.some((d) => d.kind === "audiooutput" && /bluetooth|headset|headphone/i.test(d.label || ""));
+    if (hasBt && !prevHasBtRef.current && audioRoute === "speaker") {
+      changeAudioRoute("bluetooth");
+    }
+    prevHasBtRef.current = hasBt;
+  }, [audioDevices, call?.callId]);
+
   useEffect(() => {
     if (!audioMenuOpen) return;
     const closeOnOutsidePointer = (event) => {
@@ -1387,7 +1398,8 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     const regainMicrophone = () => {
       if (document.visibilityState !== "visible") return;
       const track = localStreamRef.current?.getAudioTracks?.()[0];
-      if (track && track.readyState === "ended") changeAudioInput(audioInputId);
+      // Android may end or mute the track when backgrounded
+      if (track && (track.readyState === "ended" || track.muted)) changeAudioInput(audioInputId);
     };
     document.addEventListener("visibilitychange", regainMicrophone);
     window.addEventListener("pageshow", regainMicrophone);
@@ -1652,15 +1664,23 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                 </div>
               ) : (
                 <>
-                  <button
-                    type="button"
-                    className="call-minimize-button"
-                    onClick={minimizeCallScreen}
-                    aria-label="Back to conversation"
-                    title="Back to conversation"
-                  >
-                    <FiArrowLeft />
-                  </button>
+                  {/* top bar: ← | name + timer | spacer */}
+                  <div className="call-top-bar">
+                    <button
+                      type="button"
+                      className="call-minimize-button"
+                      onClick={minimizeCallScreen}
+                      aria-label="Back to conversation"
+                      title="Back to conversation"
+                    >
+                      <FiArrowLeft />
+                    </button>
+                    <div className="call-top-info">
+                      <h2 className="call-name">{callName || "Call"}</h2>
+                      <p className="call-status">{statusText}</p>
+                    </div>
+                    <div className="call-top-spacer" />
+                  </div>
 
                   <div className={`call-hero ${showVideoStage ? "is-compact" : ""}`}>
                     <p className="call-kind">{call.isVideo ? "Video Call" : "Voice Call"}{call.isGroup ? ` · ${remoteEntries.length + 1} in call` : ""}</p>
@@ -1669,8 +1689,6 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                         <img src={getImageURL(call.photo)} alt="" />
                       </div>
                     )}
-                    <h2 className="call-name">{callName || "Call"}</h2>
-                    <p className="call-status">{statusText}</p>
                     {muted && (
                       <p className="call-muted-pill"><FiMicOff aria-hidden="true" /> You&apos;re Muted</p>
                     )}

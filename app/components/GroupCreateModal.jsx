@@ -8,8 +8,8 @@ import { AuthContext } from "../contexts/AuthContext";
 import useBackToClose from "../helpers/useBackToClose";
 const socket = socket_connection();
 const GroupCreateModal = ({ isOpen, onClose }) => {
+  // all hooks must come before any early return
   useBackToClose(isOpen, onClose);
-  if (!isOpen) return null;
   const {
     register,
     handleSubmit,
@@ -17,6 +17,7 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
     setValue,
     setError,
     clearErrors,
+    reset,
     formState: { errors },
   } = useForm();
   const [preview, setPreview] = useState('');
@@ -120,8 +121,10 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
 
 
   useEffect(() => {
-    loadUsers();
-  }, [search]);
+    if (isOpen) loadUsers();
+  }, [search, isOpen]);
+
+  if (!isOpen) return null;
 
   const loadUsers = async () => {
     let res = await fetch(`api/users/list?search=${search}`);

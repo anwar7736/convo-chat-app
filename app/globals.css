@@ -1637,6 +1637,47 @@ form:has(> .print-container),
   font-size: 20px;
 }
 
+/* top bar: minimize button + name + timer + spacer */
+.call-top-bar {
+  position: absolute;
+  z-index: 5;
+  top: max(10px, env(safe-area-inset-top));
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.call-top-bar .call-minimize-button {
+  position: static;
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+.call-top-info {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  overflow: hidden;
+}
+.call-top-info .call-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: white;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.call-top-info .call-status {
+  margin-top: 1px;
+  font-size: 12px;
+  color: rgb(255 255 255 / 70%);
+}
+.call-top-spacer {
+  width: 44px;
+  flex-shrink: 0;
+}
+
 .call-mini-bar {
   display: flex;
   width: 100%;
@@ -2705,7 +2746,7 @@ body:has(.call-screen) {
 
 /* WhatsApp-style tap to hide/show call controls */
 .call-screen.is-controls-hidden .call-actions,
-.call-screen.is-controls-hidden .call-minimize-button,
+.call-screen.is-controls-hidden .call-top-bar,
 .call-screen.is-controls-hidden .call-muted-pill,
 .call-screen.is-controls-hidden .call-debug {
   opacity: 0;
@@ -2721,7 +2762,7 @@ body:has(.call-screen) {
   transition: opacity 0.25s ease;
 }
 .call-screen .call-actions,
-.call-screen .call-minimize-button,
+.call-screen .call-top-bar,
 .call-screen .call-muted-pill,
 .call-screen .call-hero {
   transition: opacity 0.25s ease;

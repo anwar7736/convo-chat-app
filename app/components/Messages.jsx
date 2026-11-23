@@ -68,6 +68,12 @@ const Messages = () => {
     if (firstLoad || (added > 0 && stickToBottomRef.current)) {
       el.scrollTo({ top: el.scrollHeight, behavior: firstLoad ? "auto" : "smooth" });
       stickToBottomRef.current = true;
+      if (firstLoad) {
+        // catch images that load after the initial instant scroll
+        [150, 400, 900, 1800].forEach((ms) =>
+          setTimeout(() => { if (stickToBottomRef.current) el.scrollTop = el.scrollHeight; }, ms)
+        );
+      }
     } else if (added > 0) {
       setUnseen((n) => n + added);
     }

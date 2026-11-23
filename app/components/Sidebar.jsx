@@ -26,7 +26,25 @@ const Sidebar = ({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("chats"); // "chats" | "calls" | "archived"
   const sectionRef = useRef(null);
+  const touchStartXRef = useRef(null);
+  const tabHistoryPushedRef = useRef(false);
   const router = useRouter();
+
+  // Android back button: Calls/Archived → Chats
+  useEffect(() => {
+    if (activeTab === "chats") { tabHistoryPushedRef.current = false; return; }
+    if (!tabHistoryPushedRef.current) {
+      tabHistoryPushedRef.current = true;
+      window.history.pushState({ chatSidebarTab: true }, "");
+    }
+    const onPop = () => {
+      if (window.__convoIgnoreNextPop) { window.__convoIgnoreNextPop = false; return; }
+      tabHistoryPushedRef.current = false;
+      setActiveTab("chats");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [activeTab]);
   const { user, setUser } = useContext(AuthContext);
   const [isProfileModalOpen, setProfileModalOpen] = useState(false);
   const [isAddGroupModalOpen, setAddGroupModalOpen] = useState(false);
@@ -191,8 +209,24 @@ const Sidebar = ({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
+  const TABS = ["chats", "calls", "archived"];
+  const handleTouchStart = (e) => { touchStartXRef.current = e.touches[0].clientX; };
+  const handleTouchEnd = (e) => {
+    if (touchStartXRef.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartXRef.current;
+    touchStartXRef.current = null;
+    if (Math.abs(dx) < 50) return;
+    const idx = TABS.indexOf(activeTab);
+    if (dx < 0 && idx < TABS.length - 1) setActiveTab(TABS[idx + 1]);
+    if (dx > 0 && idx > 0) setActiveTab(TABS[idx - 1]);
+  };
+
   return (
-    <aside className={`chat-sidebar flex h-full flex-col ${className}`}>
+    <aside
+      className={`chat-sidebar flex h-full flex-col ${className}`}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
       <header ref={sectionRef} className="relative flex items-center justify-between border-b border-[#263248] px-4 py-4">
         <div className="flex min-w-0 cursor-pointer items-center gap-3">
           <img

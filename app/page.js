@@ -994,6 +994,10 @@ const Home = () => {
 
   useEffect(() => {
     setReplyTarget(null);
+    // focus the input when a conversation is opened (desktop pointer devices only; phone keyboard would pop up unexpectedly)
+    if (user?._id && !window.matchMedia?.("(pointer: coarse)").matches) {
+      messageInputRef.current?.focus();
+    }
   }, [user?._id]);
 
   // reading a conversation clears its notifications from the tray, so the icon count follows what is still unread

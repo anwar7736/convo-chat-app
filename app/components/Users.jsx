@@ -350,7 +350,7 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading }) 
                     <FiArchive />
                     {contact?.archived ? "Unarchive" : "Archive"}
                   </button>
-                  {contact?.is_group !== 1 && (
+                  {contact?.is_group !== 1 && String(contact?._id) !== String(authUser?._id) && (
                     contact?.blockedByPartner && !contact?.blocked ? (
                       <p className="px-3 py-2 text-xs text-[#91a0b7]">You cannot change their block setting.</p>
                     ) : (

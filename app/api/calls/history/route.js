@@ -87,9 +87,35 @@ export async function GET(request) {
     { $addToSet: { readBy: userObjectId } }
   );
   const data = await callLogSchema.find(query).sort({ startedAt: -1 }).limit(conversationId ? 100 : 50).lean();
+  const withNames = searchParams.get("with_names") === "1";
+  let enriched = data.map((log) => viewCallLog(log, userId));
+  if (withNames && !conversationId) {
+    // attach name/photo/nickname for the conversation partner (direct) or group
+    const directIds = [...new Set(
+      enriched.filter((l) => !l.isGroup).map((l) => String(l.conversationId)).filter(Boolean)
+    )];
+    const groupIds = [...new Set(
+      enriched.filter((l) => l.isGroup).map((l) => String(l.conversationId)).filter(Boolean)
+    )];
+    const [users, groups] = await Promise.all([
+      directIds.length
+        ? userSchema.find({ _id: { $in: directIds } }).select("name nickname photo email phone").lean()
+        : Promise.resolve([]),
+      groupIds.length
+        ? (await import("@/app/models/groupModel")).groupSchema
+            .find({ _id: { $in: groupIds } }).select("name photo").lean()
+        : Promise.resolve([]),
+    ]);
+    const userMap = Object.fromEntries(users.map((u) => [String(u._id), u]));
+    const groupMap = Object.fromEntries(groups.map((g) => [String(g._id), g]));
+    enriched = enriched.map((log) => {
+      const info = log.isGroup ? groupMap[String(log.conversationId)] : userMap[String(log.conversationId)];
+      return info ? { ...log, name: info.nickname || info.name, photo: info.photo, nickname: info.nickname, email: info.email, phone: info.phone } : log;
+    });
+  }
   return NextResponse.json({
     success: true,
-    data: data.map((log) => viewCallLog(log, userId)),
+    data: enriched,
     callsMarkedRead: readResult.modifiedCount > 0,
   });
 }

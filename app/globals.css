@@ -90,6 +90,22 @@ textarea {
   background: rgb(13 19 31 / 94%);
 }
 
+/* Sidebar tab strip (Chats / Calls) */
+.sidebar-tab {
+  flex: 1;
+  padding: 10px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #728099;
+  letter-spacing: 0.02em;
+  border-bottom: 2px solid transparent;
+  transition: color 120ms, border-color 120ms;
+}
+.sidebar-tab.is-active {
+  color: #fff;
+  border-bottom-color: #6366f1;
+}
+
 .chat-main {
   position: relative;
   display: flex;
@@ -1248,8 +1264,8 @@ form:has(> .print-container),
 
 .call-avatar {
   position: relative;
-  width: min(62vw, 230px);
-  height: min(62vw, 230px);
+  width: min(48vw, 180px);
+  height: min(48vw, 180px);
   margin-bottom: 20px;
   border-radius: 999px;
 }
@@ -1264,19 +1280,7 @@ form:has(> .print-container),
   object-fit: cover;
 }
 
-.call-avatar.is-ringing::before,
-.call-avatar.is-ringing::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 999px;
-  background: rgb(129 140 248 / 35%);
-  animation: ring-wave 2s ease-out infinite;
-}
-
-.call-avatar.is-ringing::after {
-  animation-delay: 1s;
-}
+/* ripple/wave animation removed */
 
 .call-name {
   max-width: 88vw;
@@ -1531,7 +1535,8 @@ form:has(> .print-container),
   border: 2px solid rgb(255 255 255 / 25%);
   border-radius: 16px;
   box-shadow: 0 10px 30px rgb(0 0 0 / 50%);
-  cursor: pointer;
+  touch-action: none;
+  cursor: grab;
 }
 
 .call-stage.is-inset .call-tile span {
@@ -1594,8 +1599,8 @@ form:has(> .print-container),
 }
 
 .call-camera-off-content .call-avatar {
-  width: min(62vw, 230px);
-  height: min(62vw, 230px);
+  width: min(48vw, 180px);
+  height: min(48vw, 180px);
   margin: 0;
 }
 
@@ -1733,6 +1738,16 @@ form:has(> .print-container),
 
 .call-self-view.is-off {
   opacity: 1;
+  background-color: #111827;
+  /* circle avatar is painted via --cam-off-photo set inline */
+  background-image: var(--cam-off-photo, none);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 56px 56px;
+}
+
+.call-self-view.is-expanded.is-off {
+  background-size: min(48vw, 180px) min(48vw, 180px);
 }
 
 /* ================= SweetAlert (confirm dialogs) ================= */

@@ -12,8 +12,14 @@ import { getImageURL, socket_connection } from "../helpers/helper";
 const socket = socket_connection();
 const END_SCREEN_MS = 1800; // how long "Line Busy", "Call ended 01:23" … stay on screen
 
-const formatTime = (seconds) =>
-  `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+const formatTime = (seconds) => {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${String(h).padStart(2, "0")}:${mm}:${ss}` : `${mm}:${ss}`;
+};
 
 /* ---------- ringtones (generated once, no audio files needed) ---------- */
 
@@ -1574,6 +1580,16 @@ export default function CallControls({ conversation, currentUser, showButtons = 
               {showVideoStage && (
                 <div
                   className={`call-stage ${remoteEntries.length > 1 ? "is-grid" : ""} ${localVideoExpanded ? "is-inset" : ""}`}
+                  style={localVideoExpanded ? { translate: `${selfViewOffset.x}px ${selfViewOffset.y}px` } : {}}
+                  onPointerDown={localVideoExpanded ? (event) => {
+                    selfViewDragRef.current = { startX: event.clientX, startY: event.clientY, base: selfViewOffset, rect: event.currentTarget.getBoundingClientRect(), moved: false };
+                  } : undefined}
+                  onClickCapture={localVideoExpanded ? (event) => {
+                    if (!suppressSelfViewClickRef.current) return;
+                    suppressSelfViewClickRef.current = false;
+                    event.preventDefault();
+                    event.stopPropagation();
+                  } : undefined}
                   {...swapProps(localVideoExpanded, "Show partner video full screen")}
                 >
                   {remoteEntries.map(([id, stream]) => (
@@ -1596,8 +1612,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                   className={`call-self-view ${facingMode === "user" && !cameraOff ? "is-mirrored" : ""} ${cameraOff ? "is-off" : ""} ${localVideoExpanded ? "is-expanded" : ""}`}
                   style={{
                     ...(!localVideoExpanded ? { translate: `${selfViewOffset.x}px ${selfViewOffset.y}px` } : {}),
-                    // camera off: the card shows your profile picture instead of a black frame
-                    ...(cameraOff ? { background: `#111827 url(${getImageURL(currentUser?.photo)}) center / ${localVideoExpanded ? "contain" : "cover"} no-repeat` } : {}),
+                    ...(cameraOff ? { "--cam-off-photo": `url(${getImageURL(currentUser?.photo)})` } : {}),
                   }}
                   onPointerDown={(event) => {
                     if (localVideoExpanded) return;
@@ -1656,6 +1671,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                     )}
                     <h2 className="call-name">{callName || "Call"}</h2>
                     <p className="call-status">{statusText}</p>
+                    {muted && (
+                      <p className="call-muted-pill"><FiMicOff aria-hidden="true" /> You&apos;re Muted</p>
+                    )}
                     {(() => {
                       // who muted their microphone: shown under the name in voice AND video calls (in a video call
                       // the tile badge sat behind the control bar)
@@ -1810,7 +1828,7 @@ function CallVideo({ stream, label, photo, muted, cameraOff, minimized }) {
     <div className={`call-tile ${cameraOff ? "is-camera-off" : ""}`}>
       {cameraOff ? (
         <div className="call-camera-off-content">
-          <div className="call-avatar is-ringing">
+          <div className="call-avatar">
             <img src={getImageURL(photo)} alt="" />
           </div>
           <strong>{label}</strong>

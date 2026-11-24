@@ -12,6 +12,8 @@ export function dropHistoryEntry() {
   };
   window.addEventListener("popstate", settle);
   window.history.back();
+  // if no popstate ever arrives, do not block later pushes forever
+  setTimeout(() => { if (window.__convoBackPending) settle(); }, 500);
 }
 
 export function afterHistorySettles(fn) {
@@ -37,18 +39,27 @@ export default function useBackToClose(isOpen, onClose) {
     stack.push(me);
     const depth = stack.length;
     window.__convoModalDepth = depth;
-    window.history.pushState({ ...(window.history.state || {}), dialogDepth: depth }, "", window.location.href);
+    // wait for any history.back() still on its way (a layer closed a moment ago), or it would pop this new entry
+    let pushed = false;
+    let cancelled = false;
+    const cancelWait = afterHistorySettles(() => {
+      if (cancelled) return;
+      pushed = true;
+      window.history.pushState({ ...(window.history.state || {}), dialogDepth: depth }, "", window.location.href);
+    });
     const onPop = () => {
       if (stack[stack.length - 1] === me) closeRef.current?.();
     };
     window.addEventListener("popstate", onPop);
     return () => {
+      cancelled = true;
+      cancelWait();
       window.removeEventListener("popstate", onPop);
       const at = stack.indexOf(me);
       if (at >= 0) stack.splice(at, 1);
       window.__convoModalDepth = stack.length;
       // closed with a button (or after saving): drop our own history entry without the app reacting to it
-      if (window.history.state?.dialogDepth === depth) dropHistoryEntry();
+      if (pushed && window.history.state?.dialogDepth === depth) dropHistoryEntry();
     };
   }, [isOpen]);
 }

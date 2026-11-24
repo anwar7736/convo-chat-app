@@ -345,9 +345,22 @@ const Home = () => {
       setExitConfirmationOpen(true);
       addExitGuard();
     };
+    // safety net: if history ever ends up on the bare first entry (no guard, no chat, no dialog on top), put the
+    // exit guard back, otherwise the next Back press would close the app without asking
+    const restoreGuard = () => {
+      setTimeout(() => {
+        if (allowAppExitRef.current || window.__convoBackPending) return;
+        const state = window.history.state || {};
+        const layered = state.convoExitGuard || state.convoChat || state.dialogDepth || state.callScreen ||
+          state.chatPreview || state.nicknamesDialog || state.nicknameEditor;
+        if (!layered) addExitGuard();
+      }, 80);
+    };
     window.addEventListener("popstate", handleBack);
+    window.addEventListener("popstate", restoreGuard);
     return () => {
       window.removeEventListener("popstate", handleBack);
+      window.removeEventListener("popstate", restoreGuard);
       if (window.history.state?.convoExitGuard) {
         const { convoExitGuard, ...state } = window.history.state;
         window.history.replaceState(state, "", window.location.href);

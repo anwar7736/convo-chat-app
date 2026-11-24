@@ -89,7 +89,8 @@ const ProfileModal = ({ isOpen, onClose }) => {
   useEffect(() => {
     if (!isOpen) return;
     loadData();
-  }, [isOpen, user]);
+    clearErrors();
+  }, [isOpen, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // the sign-in response carries no address, so the saved profile is fetched fresh each time the form opens
   useEffect(() => {

@@ -51,6 +51,9 @@ const GroupEditOrViewModal = ({ isOpen, onClose, data }) => {
     setPreview(data?.photo ? getImageURL(data.photo) : "");
     setPhoto("");
     clearErrors();
+    setMemberError("");
+    setAdminError("");
+    setServerError("");
     setIsDisabled(false);
   }, [isOpen, data?._id, data?.name, data?.short_desc, data?.photo, setValue, clearErrors, setIsDisabled]);
 

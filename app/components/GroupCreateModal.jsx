@@ -124,6 +124,14 @@ const GroupCreateModal = ({ isOpen, onClose }) => {
     if (isOpen) loadUsers();
   }, [search, isOpen]);
 
+  // opening the dialog should never show a leftover error from the last time it was open
+  useEffect(() => {
+    if (!isOpen) return;
+    clearErrors();
+    setMemberError("");
+    setServerError("");
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!isOpen) return null;
 
   const loadUsers = async () => {

@@ -997,10 +997,13 @@ const Home = () => {
 
   useEffect(() => {
     setReplyTarget(null);
-    // focus the input when a conversation is opened (desktop pointer devices only; phone keyboard would pop up unexpectedly)
-    if (user?._id && !window.matchMedia?.("(pointer: coarse)").matches) {
-      messageInputRef.current?.focus();
-    }
+    // focus the input whenever a conversation is opened, including on phone PWA
+    if (!user?._id) return;
+    const focusInput = () => messageInputRef.current?.focus();
+    focusInput();
+    // phone PWA: the input may not be in the DOM/visible yet right after the tab switch, so retry briefly
+    const retries = [50, 150, 350].map((ms) => setTimeout(focusInput, ms));
+    return () => retries.forEach(clearTimeout);
   }, [user?._id]);
 
   // reading a conversation clears its notifications from the tray, so the icon count follows what is still unread

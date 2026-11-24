@@ -37,6 +37,8 @@ const Messages = () => {
   const [callDeleteConfirmationOpen, setCallDeleteConfirmationOpen] = useState(false);
   const [callDeleteMode, setCallDeleteMode] = useState("for-me");
   const [deletingCall, setDeletingCall] = useState(false);
+  // deleted items wait here for 5s (hidden, not yet removed) so "Undo" can bring them straight back
+  const [pendingHiddenIds, setPendingHiddenIds] = useState(() => new Set());
   const [editingMessage, setEditingMessage] = useState(null);
   useBackToClose(deleteConfirmationOpen, () => setDeleteConfirmationOpen(false));
   useBackToClose(callDeleteConfirmationOpen, () => setCallDeleteConfirmationOpen(false));
@@ -325,6 +327,41 @@ const Messages = () => {
     }
   };
 
+  // WhatsApp-style undo: hide the item(s) right away, wait 5s, then actually delete. Undo within
+  // that window just un-hides them (nothing was sent to the server yet) so they reappear in place.
+  const scheduleBatchDelete = (ids, performDelete) => {
+    if (!ids.length) return;
+    setPendingHiddenIds((current) => new Set([...current, ...ids]));
+    let settled = false;
+    const unhide = () => setPendingHiddenIds((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => next.delete(id));
+      return next;
+    });
+    const timer = setTimeout(async () => {
+      settled = true;
+      try {
+        await performDelete();
+      } catch (error) {
+        toast.error(error.message || "Unable to remove the selected item(s).");
+      } finally {
+        unhide();
+      }
+    }, 5000);
+    toast(`${ids.length} ${ids.length === 1 ? "item" : "items"} deleted`, {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          unhide();
+        },
+      },
+      duration: 5000,
+    });
+  };
+
   const deleteCallLogRequest = async (callLog, mode) => {
     const response = await fetch("/api/calls/history", {
       method: "DELETE",
@@ -350,18 +387,20 @@ const Messages = () => {
 
   // one delete for whatever is selected: messages and call logs together.
   // "for everyone" applies to your own messages and the calls you started; everything else is removed for you.
-  const confirmDeleteSelected = async () => {
+  const confirmDeleteSelected = () => {
     const selected = (messages || []).filter((msg) => selectedIds.includes(msg?._id));
     const selectedCalls = (callLogs || []).filter((item) => selectedIds.includes(item?._id));
-    if ((!selected.length && !selectedCalls.length) || deleting) return;
+    if (!selected.length && !selectedCalls.length) return;
     setDeleteConfirmationOpen(false);
-    setDeleting(true);
-    try {
+    const mode = deleteMode;
+    const ids = [...selected.map((msg) => msg._id), ...selectedCalls.map((item) => item._id)];
+    clearSelection();
+    scheduleBatchDelete(ids, async () => {
       const [messageResults, callResults] = await Promise.all([
-        Promise.allSettled(selected.map((msg) => removeMessage(msg, deleteMode))),
+        Promise.allSettled(selected.map((msg) => removeMessage(msg, mode))),
         Promise.allSettled(selectedCalls.map((callLog) => deleteCallLogRequest(
           callLog,
-          deleteMode !== "for-me" && String(callLog.callerId) === String(user?._id) ? "everyone" : "for-me"
+          mode !== "for-me" && String(callLog.callerId) === String(user?._id) ? "everyone" : "for-me"
         ))),
       ]);
       applyDeletedCallLogs(callResults.filter((result) => result.status === "fulfilled").map((result) => result.value));
@@ -370,31 +409,21 @@ const Messages = () => {
       }
       const failedResult = [...messageResults, ...callResults].find((result) => result.status === "rejected");
       if (failedResult) throw failedResult.reason;
-      clearSelection();
-    } catch (error) {
-      toast.error(error.message || "Unable to remove a selected item.");
-    } finally {
-      setDeleting(false);
-    }
+    });
   };
 
-  const confirmDeleteCall = async () => {
-    if (!selectedCallLogs.length || deletingCall) return;
-    setDeletingCall(true);
-    try {
-      const results = await Promise.allSettled(selectedCallLogs.map((callLog) => deleteCallLogRequest(callLog, callDeleteMode)));
+  const confirmDeleteCall = () => {
+    if (!selectedCallLogs.length) return;
+    setCallDeleteConfirmationOpen(false);
+    const mode = callDeleteMode;
+    const ids = selectedCallLogs.map((item) => item._id);
+    clearSelection();
+    scheduleBatchDelete(ids, async () => {
+      const results = await Promise.allSettled(selectedCallLogs.map((callLog) => deleteCallLogRequest(callLog, mode)));
       applyDeletedCallLogs(results.filter((result) => result.status === "fulfilled").map((result) => result.value));
       const failed = results.find((result) => result.status === "rejected");
       if (failed) throw failed.reason;
-
-      setCallDeleteConfirmationOpen(false);
-      clearSelection();
-      toast.success(callDeleteMode === "everyone" ? "Call logs deleted for everyone." : "Call logs deleted for you.");
-    } catch (error) {
-      toast.error(error.message || "Unable to delete selected call logs.");
-    } finally {
-      setDeletingCall(false);
-    }
+    });
   };
 
   const copySelectedMessage = async () => {
@@ -621,8 +650,8 @@ const Messages = () => {
   const canDeleteCallLogsForEveryone = selectedCallLogs.length > 0 &&
     selectedCallLogs.every((item) => String(item?.callerId) === String(user?._id));
   const timelineItems = [
-    ...(messages || []).map((item) => ({ ...item, timelineType: "message" })),
-    ...visibleCallLogs.map((item) => ({ ...item, timelineType: "call" })),
+    ...(messages || []).filter((item) => !pendingHiddenIds.has(item?._id)).map((item) => ({ ...item, timelineType: "message" })),
+    ...visibleCallLogs.filter((item) => !pendingHiddenIds.has(item?._id)).map((item) => ({ ...item, timelineType: "call" })),
     ...localMessages.map((item) => ({ ...item, timelineType: "message" })),
   ].sort((first, second) => {
     // messages still being sent stay at the bottom, in the order they were sent

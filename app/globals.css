@@ -1247,6 +1247,7 @@ form:has(> .print-container),
 .call-hero.is-compact {
   margin-top: 0;
   margin-bottom: 0;
+  padding-top: max(84px, calc(env(safe-area-inset-top) + 68px));
   text-shadow: 0 1px 6px rgb(0 0 0 / 70%);
 }
 
@@ -1641,7 +1642,7 @@ form:has(> .print-container),
 .call-top-bar {
   position: absolute;
   z-index: 5;
-  top: max(10px, env(safe-area-inset-top));
+  top: max(28px, calc(env(safe-area-inset-top) + 14px));
   left: 12px;
   right: 12px;
   display: flex;
@@ -1661,7 +1662,7 @@ form:has(> .print-container),
   overflow: hidden;
 }
 .call-top-info .call-name {
-  font-size: 16px;
+  font-size: 19px;
   font-weight: 600;
   color: white;
   overflow: hidden;
@@ -1669,8 +1670,8 @@ form:has(> .print-container),
   white-space: nowrap;
 }
 .call-top-info .call-status {
-  margin-top: 1px;
-  font-size: 12px;
+  margin-top: 3px;
+  font-size: 14px;
   color: rgb(255 255 255 / 70%);
 }
 .call-top-spacer {
@@ -1747,12 +1748,12 @@ form:has(> .print-container),
   cursor: grab;
   position: absolute;
   z-index: 3;
-  top: max(84px, calc(env(safe-area-inset-top) + 70px));
+  top: max(112px, calc(env(safe-area-inset-top) + 98px));
   right: 14px;
-  width: clamp(96px, 26vw, 200px);
-  aspect-ratio: 3 / 4;
+  width: clamp(80px, 22vw, 140px);
+  aspect-ratio: 1 / 1;
   border: 2px solid rgb(255 255 255 / 25%);
-  border-radius: 16px;
+  border-radius: 50%;
   background: #111827;
   object-fit: cover;
   box-shadow: 0 10px 30px rgb(0 0 0 / 50%);

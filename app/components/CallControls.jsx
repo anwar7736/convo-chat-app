@@ -1392,20 +1392,50 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     };
   }, [call?.callId, call?.connectedAt, call?.isVideo, callName]);
 
-  // coming back to the app: if the phone took the microphone away while it was in the background, get it again
+  // a silent looping track keeps this tab registered as "playing audio" for as long as the call is
+  // connected, which helps stop the browser/OS from fully deprioritizing it while minimized
   useEffect(() => {
     if (!call?.connectedAt) return;
-    const regainMicrophone = () => {
-      if (document.visibilityState !== "visible") return;
-      const track = localStreamRef.current?.getAudioTracks?.()[0];
-      // Android may end or mute the track when backgrounded
-      if (track && (track.readyState === "ended" || track.muted)) changeAudioInput(audioInputId);
+    const audio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAAAAAAA=");
+    audio.loop = true;
+    audio.volume = 0.01;
+    const play = () => audio.play().catch(() => {});
+    play();
+    document.addEventListener("visibilitychange", play);
+    return () => {
+      document.removeEventListener("visibilitychange", play);
+      audio.pause();
     };
+  }, [call?.callId, call?.connectedAt]);
+
+  // Android may end or mute the local mic track while the app is backgrounded during a call. We cannot stop the
+  // OS from doing that, but we re-grab the microphone the instant it is allowed again instead of only on return
+  // to the app: a 1.5s heartbeat keeps checking even while hidden (the call's live peer connection exempts this
+  // tab from Chrome's background-timer throttling), so audio recovers as soon as the OS releases the mic, not
+  // only once the user physically reopens the app.
+  useEffect(() => {
+    if (!call?.connectedAt) return;
+    let regaining = false;
+    const regainMicrophone = async () => {
+      if (regaining) return;
+      const track = localStreamRef.current?.getAudioTracks?.()[0];
+      if (!track || (track.readyState !== "ended" && !track.muted)) return;
+      regaining = true;
+      try {
+        await changeAudioInput(audioInputId);
+      } finally {
+        regaining = false;
+      }
+    };
+    const heartbeat = setInterval(regainMicrophone, 1500);
     document.addEventListener("visibilitychange", regainMicrophone);
     window.addEventListener("pageshow", regainMicrophone);
+    window.addEventListener("focus", regainMicrophone);
     return () => {
+      clearInterval(heartbeat);
       document.removeEventListener("visibilitychange", regainMicrophone);
       window.removeEventListener("pageshow", regainMicrophone);
+      window.removeEventListener("focus", regainMicrophone);
     };
   }, [call?.callId, call?.connectedAt, audioInputId]);
 
@@ -1614,6 +1644,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                       muted={remoteMedia[id]?.muted}
                       cameraOff={remoteMedia[id]?.cameraOff}
                       minimized={callMinimized}
+                      isGroup={call.isGroup}
                     />
                   ))}
                 </div>
@@ -1646,10 +1677,6 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
               {callMinimized ? (
                 <div className="call-mini-bar">
-                  <button type="button" className="call-mini-main" onClick={() => setCallMinimized(false)} aria-label={`Return to ${callName || "call"}`}>
-                    <span className="call-mini-pulse" />
-                    <span className="call-mini-text">{callName || "Call"} · {statusText}</span>
-                  </button>
                   <button
                     type="button"
                     className={`call-mini-mute ${muted ? "is-muted" : ""}`}
@@ -1658,6 +1685,10 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                     aria-pressed={muted}
                   >
                     {muted ? <FiMicOff /> : <FiMic />}
+                  </button>
+                  <button type="button" className="call-mini-main" onClick={() => setCallMinimized(false)} aria-label={`Return to ${callName || "call"}`}>
+                    <span className="call-mini-pulse" />
+                    <span className="call-mini-text">{callName || "Call"} · {statusText}</span>
                   </button>
                   <button type="button" className="call-mini-end" onClick={hangUp} aria-label="End call">
                     <FiPhoneOff />
@@ -1818,7 +1849,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   );
 }
 
-function CallVideo({ stream, label, photo, muted, cameraOff, minimized }) {
+function CallVideo({ stream, label, photo, muted, cameraOff, minimized, isGroup }) {
   const videoRef = useRef(null);
   useEffect(() => {
     const video = videoRef.current;
@@ -1850,7 +1881,7 @@ function CallVideo({ stream, label, photo, muted, cameraOff, minimized }) {
           <div className="call-avatar">
             <img src={getImageURL(photo)} alt="" />
           </div>
-          <strong>{label}</strong>
+          {isGroup && <strong>{label}</strong>}
           {muted && <span>Muted</span>}
         </div>
       ) : (

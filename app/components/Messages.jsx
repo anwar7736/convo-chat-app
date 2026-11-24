@@ -555,7 +555,9 @@ const Messages = () => {
 
   const onTouchStart = (event, data, type = "message") => {
     const touch = event.touches[0];
-    touchRef.current = { id: data?._id, x: touch.clientX, y: touch.clientY, dx: 0, swiping: false, held: false, type };
+    // the other person's messages swipe left to right, your own right to left
+    const dir = data?.sender?._id === user?._id ? -1 : 1;
+    touchRef.current = { id: data?._id, x: touch.clientX, y: touch.clientY, dx: 0, swiping: false, held: false, type, dir };
     clearTimeout(holdTimerRef.current);
     holdTimerRef.current = setTimeout(() => holdSelect(data, type), HOLD_MS);
   };
@@ -567,10 +569,10 @@ const Messages = () => {
     const dx = touch.clientX - state.x;
     const dy = touch.clientY - state.y;
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) clearTimeout(holdTimerRef.current);
-    // either direction replies, like WhatsApp
-    if (state.type !== "call" && !state.swiping && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.5 && !selecting) state.swiping = true;
+    const along = dx * (state.dir || 1); // positive = the swipe direction that belongs to this message
+    if (state.type !== "call" && !state.swiping && along > 12 && Math.abs(dx) > Math.abs(dy) * 1.5 && !selecting) state.swiping = true;
     if (state.swiping) {
-      state.dx = Math.max(-SWIPE_MAX_PX, Math.min(SWIPE_MAX_PX, dx));
+      state.dx = (state.dir || 1) * Math.max(0, Math.min(SWIPE_MAX_PX, along));
       setSwipe({ id: state.id, dx: state.dx });
     }
   };

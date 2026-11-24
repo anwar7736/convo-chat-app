@@ -43,6 +43,9 @@ const Messages = () => {
   useBackToClose(deleteConfirmationOpen, () => setDeleteConfirmationOpen(false));
   useBackToClose(callDeleteConfirmationOpen, () => setCallDeleteConfirmationOpen(false));
   useBackToClose(Boolean(editingMessage), () => setEditingMessage(null));
+  useBackToClose(Boolean(reactionDetailsFor), () => setReactionDetailsFor(null));
+  useBackToClose(Boolean(emojiPickerFor), () => setEmojiPickerFor(null));
+  useBackToClose(Boolean(reactionFor), () => setReactionFor(null));
   const [editText, setEditText] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
   const messagesRef = useRef(messages);
@@ -927,9 +930,14 @@ const Messages = () => {
             else if (data.status === "ended" && !data.answeredAt) callStatus = outgoing ? "Cancelled" : "Call Ended";
             else {
               const duration = Math.max(0, Number(data.durationSeconds) || 0);
-              const minutes = Math.floor(duration / 60);
+              const hours = Math.floor(duration / 3600);
+              const minutes = Math.floor((duration % 3600) / 60);
               const seconds = duration % 60;
-              callStatus = minutes ? `${minutes} min${seconds ? ` ${seconds} sec` : ""}` : `${seconds} sec`;
+              callStatus = [
+                hours ? `${hours} hr` : "",
+                minutes ? `${minutes} min` : "",
+                seconds || (!hours && !minutes) ? `${seconds} sec` : "",
+              ].filter(Boolean).join(" ");
             }
             const CallIcon = isMissed ? FiPhoneMissed : data.isVideo ? FiVideo : outgoing ? FiPhoneOutgoing : FiPhoneIncoming;
             const callStartedAt = new Date(data.startedAt);

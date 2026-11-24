@@ -22,7 +22,7 @@ import {
   socket_connection,
 } from "./helpers/helper";
 import { draftKey, getDraft, setDraft } from "./helpers/drafts";
-import { afterHistorySettles } from "./helpers/useBackToClose";
+import useBackToClose, { afterHistorySettles } from "./helpers/useBackToClose";
 let socket = socket_connection();
 
 // must match the upload route (Vercel accepts request bodies up to about 4.5 MB)
@@ -86,6 +86,7 @@ const Home = () => {
   const [isModalOpen, setModalOpen] = useState(false);
   const [data, setData] = useState("");
   const [showPicker, setShowPicker] = useState(false);
+  useBackToClose(showPicker, () => setShowPicker(false));
   const [attachment, setAttachment] = useState(null);
   const [attachmentDuration, setAttachmentDuration] = useState(0);
   const [replyTarget, setReplyTarget] = useState(null);

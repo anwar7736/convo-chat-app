@@ -72,6 +72,26 @@ app.get("/", (_request, response) => {
   response.status(200).json({ status: "ok", service: "socket-server" });
 });
 
+// Reject button on a ringing-call notification while the app is closed: the service worker sends the user's socket
+// token here (as text/plain, so the browser needs no preflight) instead of opening the app just to decline.
+app.options("/call-reject", (request, response) => {
+  const origin = request.headers.origin;
+  if (isAllowedOrigin(origin) && origin) response.setHeader("Access-Control-Allow-Origin", origin);
+  response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  response.status(204).end();
+});
+app.post("/call-reject", express.text({ type: "*/*", limit: "2kb" }), (request, response) => {
+  const origin = request.headers.origin;
+  if (!isAllowedOrigin(origin)) return response.status(403).json({ success: false });
+  if (origin) response.setHeader("Access-Control-Allow-Origin", origin);
+  const payload = parsePayload(request.body);
+  const userId = decodeSocketToken(payload?.token);
+  if (!userId) return response.status(401).json({ success: false });
+  const done = rejectCall(userId, { callId: payload.callId, callerId: payload.callerId }, null);
+  response.status(done ? 200 : 404).json({ success: done });
+});
+
 function decodeSession(cookieHeader) {
   const token = (cookieHeader || "")
     .split(";")
@@ -556,15 +576,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("call:reject", (data) => {
-    const invite = parsePayload(data);
-    const call = calls.get(invite?.callId);
-    if (!call?.invited.has(userId) || call.callerId !== invite.callerId || call.accepted.has(userId)) return;
-    call.rejected.add(userId);
-    socket.to(userRoom(userId)).emit("call:end", { callId: invite.callId, userId, reason: "declined-elsewhere" });
-    emitToCallMember(call, call.callerId, "call:rejected", { callId: invite.callId, userId });
-    // nobody answered and everybody declined: the caller's screen closes
-    const waiting = [...call.invited].filter((id) => !call.accepted.has(id) && !call.rejected.has(id));
-    if (call.accepted.size === 1 && !waiting.length) endCall(invite.callId, userId, "declined");
+    rejectCall(userId, parsePayload(data), socket);
   });
 
   socket.on("call:signal", (data) => {
@@ -624,7 +636,11 @@ io.on("connection", (socket) => {
   socket.on("call:end", (data) => {
     const payload = parsePayload(data);
     const call = calls.get(payload?.callId);
-    if (!call?.accepted.has(userId) || call.sockets.get(userId) !== socket.id) return;
+    if (!call?.accepted.has(userId)) return;
+    // the seat belongs to this socket, or is empty because the phone's connection dropped (backgrounded app, network
+    // switch) and the hang-up arrives on the new socket before it re-joined: that is still this person hanging up
+    const seat = call.sockets.get(userId);
+    if (seat && seat !== socket.id) return;
     leaveCall(payload.callId, userId);
   });
 
@@ -664,6 +680,21 @@ io.on("connection", (socket) => {
     next();
   });
 });
+
+// A ringing call is declined. `socket` is the one that declined (its own tab is not told again); null = declined
+// over HTTP, so every tab of that user stops ringing.
+function rejectCall(userId, invite, socket) {
+  const call = calls.get(invite?.callId);
+  if (!call?.invited.has(userId) || call.callerId !== invite.callerId || call.accepted.has(userId)) return false;
+  call.rejected.add(userId);
+  const others = socket ? socket.to(userRoom(userId)) : io.to(userRoom(userId));
+  others.emit("call:end", { callId: invite.callId, userId, reason: "declined-elsewhere" });
+  emitToCallMember(call, call.callerId, "call:rejected", { callId: invite.callId, userId });
+  // nobody answered and everybody declined: the caller's screen closes
+  const waiting = [...call.invited].filter((id) => !call.accepted.has(id) && !call.rejected.has(id));
+  if (call.accepted.size === 1 && !waiting.length) endCall(invite.callId, userId, "declined");
+  return true;
+}
 
 function emitToCallMember(call, memberId, event, payload) {
   const socketId = call.sockets.get(memberId);

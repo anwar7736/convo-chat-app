@@ -80,6 +80,7 @@ export async function POST(request) {
     isGroup,
     callId,
     callerId: userId,
+    socketUrl: process.env.NEXT_PUBLIC_SOCKET_URL || "",
   })).catch((error) => console.error("Unable to send a ringing-call notification:", error));
 
   return NextResponse.json({ success: true });

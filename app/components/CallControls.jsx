@@ -3,7 +3,7 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FaVideo } from "react-icons/fa";
-import { FiArrowLeft, FiBluetooth, FiCheck, FiMic, FiMicOff, FiPhone, FiPhoneOff, FiRefreshCw, FiSmartphone, FiVideo, FiVideoOff, FiVolume2 } from "react-icons/fi";
+import { FiArrowLeft, FiBluetooth, FiCheck, FiHeadphones, FiMic, FiMicOff, FiPhone, FiPhoneOff, FiRefreshCw, FiSmartphone, FiVideo, FiVideoOff, FiVolume2 } from "react-icons/fi";
 import { MdAddIcCall } from "react-icons/md";
 import { toast } from "sonner";
 import { UserListContext } from "../contexts/UserListContext";
@@ -338,15 +338,27 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     };
   }, [call]);
 
-  // auto-switch to Bluetooth when a BT output device connects (or is already present at call start)
-  const prevHasBtRef = useRef(false);
+  // the Audio button follows what is plugged in: Bluetooth or wired headphones when connected (also if already
+  // present at call start), back to the speaker when they are removed. Android lists these under inputs as well as
+  // outputs, so every device label is checked; the built-in "Headset earpiece" is the phone's own earpiece, not a headset.
+  const prevRouteKeyRef = useRef("speaker");
   useEffect(() => {
-    if (!call) { prevHasBtRef.current = false; return; }
-    const hasBt = audioDevices.some((d) => d.kind === "audiooutput" && /bluetooth|headset|headphone/i.test(d.label || ""));
-    if (hasBt && !prevHasBtRef.current && audioRoute === "speaker") {
+    if (!call) { prevRouteKeyRef.current = "speaker"; return; }
+    const labels = audioDevices.map((d) => d.label || "");
+    const hasBt = labels.some((l) => /bluetooth|airpods|buds/i.test(l));
+    const hasWired = !hasBt && labels.some((l) => !/earpiece/i.test(l) && /wired|headphone|earphone|usb|headset/i.test(l));
+    const key = hasBt ? "bluetooth" : hasWired ? "headset" : "speaker";
+    if (key === prevRouteKeyRef.current) return;
+    prevRouteKeyRef.current = key;
+    if (key === "bluetooth") {
+      setAudioRoute("bluetooth");
       changeAudioRoute("bluetooth");
+    } else if (key === "headset") {
+      setAudioRoute("headset");
+    } else if (audioRoute === "bluetooth" || audioRoute === "headset") {
+      changeAudioRoute("speaker");
+      setAudioRoute("speaker");
     }
-    prevHasBtRef.current = hasBt;
   }, [audioDevices, call?.callId]);
 
   useEffect(() => {
@@ -1060,7 +1072,8 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   useEffect(() => {
     if (!incoming || document.visibilityState === "visible") return;
     if (!("serviceWorker" in navigator) || typeof Notification === "undefined" || Notification.permission !== "granted") return;
-    const tag = `incoming-${incoming.callId}`;
+    // same tag as the pushed ringing notification, so the two are one notification, with Accept / Reject
+    const tag = `ring-${incoming.callId}`;
     navigator.serviceWorker.ready.then((registration) => registration.showNotification(
       `Incoming ${incoming.isVideo ? "Video" : "Voice"} Call`,
       {
@@ -1072,7 +1085,11 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         tag,
         requireInteraction: true,
         vibrate: [400, 200, 400, 200, 400],
-        data: { url: "/" },
+        actions: [
+          { action: "accept", title: "Accept" },
+          { action: "reject", title: "Reject" },
+        ],
+        data: { url: "/", kind: "call-ring", callId: incoming.callId, callerId: incoming.callerId },
       }
     )).catch(() => {});
     return () => {
@@ -1471,6 +1488,10 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       ? call.conversationName
       : personFor(call.callerId)?.nickname || call.callerName
     : "";
+  // the call's picture: set when it starts, or looked up once the contact list has loaded (accepting straight from a
+  // notification can happen before it has)
+  const callPhoto = call?.photo ||
+    (call && !call.isGroup ? personFor(call.isCaller ? call.conversationId : call.callerId)?.photo : undefined);
   // Tell the phone this is a call in progress (a media session with hang-up / mute buttons in the notification shade):
   // it keeps the page treated as active while the app is in the background, so the call is less likely to go quiet.
   useEffect(() => {
@@ -1478,7 +1499,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     const session = navigator.mediaSession;
     try {
       let artwork = [];
-      try { artwork = [{ src: new URL(getImageURL(call.photo), window.location.href).href }]; } catch {}
+      try { artwork = [{ src: new URL(getImageURL(callPhoto), window.location.href).href }]; } catch {}
       session.metadata = new window.MediaMetadata({
         title: callName || "Call",
         artist: call.isVideo ? "Video Call" : "Voice Call",
@@ -1747,7 +1768,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                       key={id}
                       stream={stream}
                       label={personFor(id)?.nickname || personFor(id)?.name || (String(id) === String(conversation?._id) ? conversation.nickname || conversation.name : "Participant")}
-                      photo={personFor(id)?.photo}
+                      photo={personFor(id)?.photo || (!call.isGroup ? callPhoto : undefined)}
                       muted={remoteMedia[id]?.muted}
                       cameraOff={remoteMedia[id]?.cameraOff}
                       minimized={callMinimized}
@@ -1825,7 +1846,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                     <p className="call-kind">{call.isVideo ? "Video Call" : "Voice Call"}{call.isGroup ? ` · ${remoteEntries.length + 1} in call` : ""}</p>
                     {!showVideoStage && (
                       <div className={`call-avatar ${call.connectedAt ? "" : "is-ringing"}`}>
-                        <img src={getImageURL(call.photo)} alt="" />
+                        <img src={getImageURL(callPhoto)} alt="" />
                       </div>
                     )}
                     {muted && (
@@ -1862,7 +1883,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                         aria-haspopup="menu"
                         title="Audio output"
                       >
-                        {audioRoute === "bluetooth" ? <FiBluetooth /> : audioRoute === "earpiece" ? <FiSmartphone /> : <FiVolume2 />}
+                        {audioRoute === "bluetooth" ? <FiBluetooth /> : audioRoute === "headset" ? <FiHeadphones /> : audioRoute === "earpiece" ? <FiSmartphone /> : <FiVolume2 />}
                       </button>
                       <span>Audio</span>
                       {audioMenuOpen && (

@@ -1,7 +1,6 @@
 import { createHmac } from "crypto";
 import mongoose from "mongoose";
-import { NextResponse, after } from "next/server";
-import { sendPushNotification } from "@/app/lib/pushNotifications";
+import { NextResponse } from "next/server";
 import { callLogConversationMatch, viewCallLog } from "@/app/lib/callLogs";
 import { mongoDB_connect } from "@/app/helpers/helper";
 import { getSessionUserId } from "@/app/lib/session";
@@ -243,28 +242,7 @@ export async function POST(request) {
       },
       { upsert: true, new: true }
     );
-    after(async () => {
-      try {
-        const targets = participants.filter((id) => id !== userId);
-        if (!targets.length) return;
-        const muted = new Set((await userSchema.find({
-          _id: { $in: targets.map((id) => new mongoose.Types.ObjectId(id)) },
-          mutedConversations: conversationObjectId,
-        }).distinct("_id")).map(String));
-        const recipients = targets.filter((id) => !muted.has(id));
-        if (!recipients.length) return;
-        const caller = await userSchema.findById(userId).select("name").lean();
-        const ticketId = isGroup ? conversationId : userId;
-        await sendPushNotification(recipients, () => ({
-          title: `Incoming ${body.isVideo ? "Video" : "Voice"} Call`,
-          body: caller?.name || "Someone is calling you",
-          url: `/?ticket=${ticketId}&is_group=${isGroup ? "1" : "0"}`,
-          tag: `incoming-${callId}`,
-        }));
-      } catch (error) {
-        console.error("Unable to send an incoming-call notification:", error);
-      }
-    });
+    // the ringing notification (with Accept / Reject) is sent by /api/calls/ring
     return NextResponse.json({ success: true, socket_event: createCallLogEvent(log, userId) });
   }
 

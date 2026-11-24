@@ -1698,8 +1698,9 @@ form:has(> .print-container),
   min-width: 0;
   flex: 1;
   align-items: center;
+  justify-content: center;
   gap: 9px;
-  text-align: left;
+  text-align: center;
 }
 
 .call-mini-text {
@@ -1750,10 +1751,10 @@ form:has(> .print-container),
   z-index: 3;
   top: max(112px, calc(env(safe-area-inset-top) + 98px));
   right: 14px;
-  width: clamp(80px, 22vw, 140px);
-  aspect-ratio: 1 / 1;
+  width: clamp(96px, 26vw, 200px);
+  aspect-ratio: 3 / 4;
   border: 2px solid rgb(255 255 255 / 25%);
-  border-radius: 50%;
+  border-radius: 16px;
   background: #111827;
   object-fit: cover;
   box-shadow: 0 10px 30px rgb(0 0 0 / 50%);
@@ -1781,8 +1782,8 @@ form:has(> .print-container),
 .call-self-view.is-off {
   opacity: 1;
   background-color: #111827;
-  /* circle avatar is painted via --cam-off-photo set inline */
-  background-image: var(--cam-off-photo, none);
+  /* circle avatar: the photo painted via --cam-off-photo, with the corners outside the circle covered */
+  background-image: radial-gradient(circle closest-side at center, transparent 96%, #111827 100%), var(--cam-off-photo, none);
   background-repeat: no-repeat;
   background-position: center;
   background-size: 56px 56px;

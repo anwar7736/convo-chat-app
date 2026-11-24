@@ -78,6 +78,7 @@ self.addEventListener("push", (event) => {
       callId: payload.callId || "",
       callerId: payload.callerId || "",
       isVideo: payload.isVideo ? 1 : 0,
+      socketUrl: payload.socketUrl || "",
     };
 
     // ringing: Accept / Reject buttons; stays until answered, declined or the call is cancelled
@@ -165,6 +166,23 @@ self.addEventListener("notificationclick", (event) => {
           return;
         } catch {
           // could not reach that window: open a new one
+        }
+      }
+      // app closed: decline straight from here without opening it; only open the app if that did not work
+      if (event.action === "reject" && opened.socketUrl && opened.callId) {
+        try {
+          const tokenResponse = await fetch("/api/socket-token", { cache: "no-store" });
+          const { token } = await tokenResponse.json();
+          if (token) {
+            const declined = await fetch(`${opened.socketUrl}/call-reject`, {
+              method: "POST",
+              headers: { "Content-Type": "text/plain" },
+              body: JSON.stringify({ token, callId: opened.callId, callerId: opened.callerId }),
+            });
+            if (declined.ok) return;
+          }
+        } catch {
+          // fall through: open the app and decline there
         }
       }
       const params = new URLSearchParams({

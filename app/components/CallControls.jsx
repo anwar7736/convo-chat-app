@@ -700,6 +700,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        call_id: active.callId,
         conversation_id: active.conversationId,
         is_group: active.isGroup ? 1 : 0,
         is_video: active.isVideo,
@@ -712,6 +713,24 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       }
     }).catch((error) => {
       console.error("Unable to send a missed-call notification:", error);
+    });
+  }, []);
+
+  // wakes the people being called (closed or backgrounded app) with an Accept / Reject notification
+  const notifyRing = useCallback((active, recipients) => {
+    if (!active?.isCaller || !recipients?.length) return;
+    return fetch("/api/calls/ring", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        call_id: active.callId,
+        conversation_id: active.conversationId,
+        is_group: active.isGroup ? 1 : 0,
+        is_video: active.isVideo,
+        recipient_ids: recipients,
+      }),
+    }).catch((error) => {
+      console.error("Unable to send a ringing-call notification:", error);
     });
   }, []);
 
@@ -837,6 +856,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         isGroup: invitedCall.isGroup,
         recipients,
       });
+      void notifyRing(invitedCall, recipients);
     } catch (error) {
       if (callSetup) {
         callSetup.cancel();
@@ -933,6 +953,92 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     });
   };
 
+  /* ---------- buttons on call notifications: Accept / Reject / Hang Up / Call Back ---------- */
+  const pendingCallActionRef = useRef(null); // { action, callId, at }: waits for that call to reach this screen
+  const [callActionTick, setCallActionTick] = useState(0);
+  const hangUpRef = useRef(hangUp);
+  hangUpRef.current = hangUp;
+
+  // the app was opened by the Accept / Reject button: the address says what to do with the call that follows
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const action = params.get("callAction");
+    if (action !== "accept" && action !== "reject") return;
+    pendingCallActionRef.current = { action, callId: params.get("callId") || "", at: Date.now() };
+    ["callAction", "callId", "callerId"].forEach((key) => params.delete(key));
+    const query = params.toString();
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    setCallActionTick((tick) => tick + 1);
+  }, []);
+
+  // apply a waiting accept / reject as soon as that call is ringing on this screen
+  useEffect(() => {
+    const pending = pendingCallActionRef.current;
+    if (!pending || !incoming) return;
+    if (Date.now() - pending.at > 60000) {
+      pendingCallActionRef.current = null;
+      return;
+    }
+    if (pending.callId && pending.callId !== incoming.callId) return;
+    pendingCallActionRef.current = null;
+    if (pending.action === "accept") acceptCall();
+    else declineCall();
+  }, [incoming?.callId, callActionTick]);
+
+  useEffect(() => {
+    const onCallAction = (event) => {
+      const { action, callId, ticket, isGroup, isVideo } = event.detail || {};
+      if (action === "hangup") {
+        hangUpRef.current?.();
+        return;
+      }
+      if (action === "accept" || action === "reject") {
+        pendingCallActionRef.current = { action, callId: callId || "", at: Date.now() };
+        setCallActionTick((tick) => tick + 1);
+        return;
+      }
+      if (action === "callback") {
+        if (callRef.current || incomingRef.current) {
+          toast.info("End the current call before calling back.");
+          return;
+        }
+        if (conversation?._id && String(conversation._id) === String(ticket) && Number(conversation.is_group) === Number(isGroup)) {
+          startCallRef.current?.(Boolean(isVideo));
+          return;
+        }
+        const params = new URLSearchParams({ ticket: ticket || "", is_group: isGroup ? "1" : "0", callback: isVideo ? "video" : "voice" });
+        window.location.assign(`/?${params.toString()}`);
+      }
+    };
+    window.addEventListener("chat:call-action", onCallAction);
+    return () => window.removeEventListener("chat:call-action", onCallAction);
+  }, [conversation?._id, conversation?.is_group]);
+
+  // the ringing notification goes away once the call is answered, declined, cancelled, or shown on screen
+  const lastRingIdRef = useRef("");
+  useEffect(() => {
+    const closeRing = (id) => {
+      if (!id || typeof navigator === "undefined" || !navigator.serviceWorker) return;
+      navigator.serviceWorker.ready
+        .then((registration) => registration.getNotifications({ tag: `ring-${id}` }))
+        .then((list) => list.forEach((item) => item.close()))
+        .catch(() => {});
+    };
+    const id = incoming?.callId || "";
+    if (id) lastRingIdRef.current = id;
+    else if (lastRingIdRef.current) {
+      closeRing(lastRingIdRef.current);
+      lastRingIdRef.current = "";
+    }
+    if (!id) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") closeRing(id);
+    };
+    onVisible();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [incoming?.callId]);
+
   /* ---------- sounds & vibration ---------- */
   // the call rings until someone answers, declines or the caller cancels (like WhatsApp/Messenger)
   useTone("ring", Boolean(incoming));
@@ -1009,7 +1115,8 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           tag,
           requireInteraction: true,
           timestamp: Date.now(),
-          data: { url: "/" },
+          actions: [{ action: "hangup", title: "Hang Up" }],
+          data: { url: "/", kind: "call-active" },
         });
       } catch (error) {
         console.error("Unable to show the ongoing call notification:", error);

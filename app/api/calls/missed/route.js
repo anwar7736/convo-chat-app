@@ -70,12 +70,18 @@ export async function POST(request) {
   const caller = await userSchema.findById(userId).select("name").lean();
   const ticketId = isGroup ? conversationId : userId;
   const unreadByUser = await getUnreadNotificationCounts(recipients);
+  const ringCallId = /^[a-f\d-]{36}$/i.test(String(body?.call_id || "")) ? String(body.call_id) : "";
   await sendPushNotification(recipients, (recipientId) => ({
+    type: "call-missed",
     title: `Missed ${isVideo ? "Video" : "Voice"} Call`,
     body: groupName ? `${caller?.name || "Someone"} @ ${groupName}` : caller?.name || "Someone called you",
     url: `/?ticket=${ticketId}&is_group=${isGroup ? "1" : "0"}`,
     tag: `call-${ticketId}`,
     badge: unreadByUser.get(recipientId) || 0,
+    ticket: ticketId,
+    isGroup,
+    isVideo,
+    ringCallId,
   })).catch((error) => console.error("Unable to send a missed-call notification:", error));
 
   return NextResponse.json({ success: true });

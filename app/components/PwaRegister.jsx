@@ -11,6 +11,11 @@ export default function PwaRegister() {
 
     // a tapped notification asks the open app to show that chat (?ticket=…); signed out, sign-in comes first
     const onMessage = (event) => {
+      // Accept / Reject / Hang Up / Call Back buttons on call notifications: the call screen handles them
+      if (event.data?.type === "call-action") {
+        window.dispatchEvent(new CustomEvent("chat:call-action", { detail: event.data }));
+        return;
+      }
       const url = event.data?.type === "open-url" ? String(event.data.url || "") : "";
       if (url.startsWith("/") && !url.startsWith("//")) window.location.assign(url);
     };

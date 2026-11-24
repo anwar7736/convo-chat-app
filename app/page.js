@@ -460,6 +460,7 @@ const Home = () => {
     const params = new URLSearchParams(window.location.search);
     const ticketId = params.get("ticket");
     const isGroup = params.get("is_group") === "1";
+    const callback = params.get("callback"); // "Call Back" on a missed-call notification: ring them once the chat is open
     if (!ticketId || !/^[a-f\d]{24}$/i.test(ticketId)) return;
     let cancelled = false;
     const openTicket = async () => {
@@ -482,6 +483,10 @@ const Home = () => {
         setMessages(timeline.messages);
         setCallLogs(timeline.callLogs);
         window.history.replaceState(window.history.state, "", "/");
+        if (callback === "voice" || callback === "video") {
+          // small delay so the call screen has the opened conversation before it is asked to call
+          setTimeout(() => window.dispatchEvent(new CustomEvent("chat:call-log-action", { detail: { isVideo: callback === "video" } })), 500);
+        }
       } catch (error) {
         if (!cancelled) {
           console.error("Unable to open the notification conversation:", error);

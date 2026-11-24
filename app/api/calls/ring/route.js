@@ -1,0 +1,86 @@
+import mongoose from "mongoose";
+import { NextResponse } from "next/server";
+import { mongoDB_connect } from "@/app/helpers/helper";
+import { getSessionUserId } from "@/app/lib/session";
+import { sendPushNotification } from "@/app/lib/pushNotifications";
+import { groupMemberSchema } from "@/app/models/groupMemberModel";
+import { groupSchema } from "@/app/models/groupModel";
+import { userSchema } from "@/app/models/userModel";
+
+const objectIdPattern = /^[a-f\d]{24}$/i;
+const callIdPattern = /^[a-f\d-]{36}$/i;
+
+// An incoming call while the app is closed or in the background: the people being called get a ringing
+// notification with Accept / Reject buttons. The call itself still rings through the socket once the app
+// opens; this only wakes the phone. Only people in that chat/group can be notified.
+export async function POST(request) {
+  const userId = await getSessionUserId(request);
+  if (!userId) return NextResponse.json({ success: false, message: "Unauthorized." }, { status: 401 });
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ success: false, message: "Invalid request body." }, { status: 400 });
+  }
+  const callId = String(body?.call_id || "");
+  const conversationId = String(body?.conversation_id || "");
+  const isGroup = body?.is_group === 1 || body?.is_group === true;
+  const isVideo = Boolean(body?.is_video);
+  const requested = Array.isArray(body?.recipient_ids) ? body.recipient_ids.map(String).filter((id) => objectIdPattern.test(id)) : [];
+  if (!callIdPattern.test(callId) || !objectIdPattern.test(conversationId) || !requested.length || requested.length > 7) {
+    return NextResponse.json({ success: false, message: "A valid call is required." }, { status: 400 });
+  }
+
+  await mongoDB_connect();
+  let recipients;
+  let groupName = null;
+  if (isGroup) {
+    const groupId = new mongoose.Types.ObjectId(conversationId);
+    const callerIsMember = await groupMemberSchema.exists({ group_id: groupId, user_id: new mongoose.Types.ObjectId(userId), status: 1 });
+    if (!callerIsMember) return NextResponse.json({ success: false, message: "You are not a member of this group." }, { status: 403 });
+    const members = await groupMemberSchema.find({
+      group_id: groupId,
+      status: 1,
+      user_id: { $in: requested.map((id) => new mongoose.Types.ObjectId(id)) },
+    }).distinct("user_id");
+    recipients = members.map(String).filter((id) => id !== userId);
+    groupName = (await groupSchema.findById(groupId).select("name").lean())?.name || "Group";
+  } else {
+    recipients = requested.length === 1 && requested[0] === conversationId && conversationId !== userId ? [conversationId] : [];
+    if (recipients.length) {
+      const [caller, recipient] = await Promise.all([
+        userSchema.findById(userId).select("blockedUsers").lean(),
+        userSchema.findById(conversationId).select("blockedUsers").lean(),
+      ]);
+      const blocked = (caller?.blockedUsers || []).some((id) => String(id) === conversationId) ||
+        (recipient?.blockedUsers || []).some((id) => String(id) === userId);
+      if (blocked) recipients = [];
+    }
+  }
+  if (!recipients.length) return NextResponse.json({ success: false, message: "Nobody to notify." }, { status: 400 });
+
+  const mutedUsers = await userSchema.find({
+    _id: { $in: recipients.map((id) => new mongoose.Types.ObjectId(id)) },
+    mutedConversations: new mongoose.Types.ObjectId(conversationId),
+  }).distinct("_id");
+  const mutedUserIds = new Set(mutedUsers.map(String));
+  recipients = recipients.filter((id) => !mutedUserIds.has(id));
+  if (!recipients.length) return NextResponse.json({ success: true, muted: true });
+
+  const caller = await userSchema.findById(userId).select("name").lean();
+  const ticketId = isGroup ? conversationId : userId;
+  await sendPushNotification(recipients, () => ({
+    type: "call-ring",
+    title: `Incoming ${isVideo ? "Video" : "Voice"} Call`,
+    body: groupName ? `${caller?.name || "Someone"} @ ${groupName}` : caller?.name || "Someone is calling you",
+    url: `/?ticket=${ticketId}&is_group=${isGroup ? "1" : "0"}`,
+    tag: `ring-${callId}`,
+    ticket: ticketId,
+    isGroup,
+    callId,
+    callerId: userId,
+  })).catch((error) => console.error("Unable to send a ringing-call notification:", error));
+
+  return NextResponse.json({ success: true });
+}

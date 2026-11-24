@@ -17,7 +17,10 @@ export default function PwaRegister() {
         return;
       }
       const url = event.data?.type === "open-url" ? String(event.data.url || "") : "";
-      if (url.startsWith("/") && !url.startsWith("//")) window.location.assign(url);
+      if (url.startsWith("/") && !url.startsWith("//")) {
+        window.__convoLoggingOut = true; // this reload is deliberate: no "leave site?" prompt
+        window.location.assign(url);
+      }
     };
     navigator.serviceWorker.addEventListener("message", onMessage);
     return () => navigator.serviceWorker.removeEventListener("message", onMessage);

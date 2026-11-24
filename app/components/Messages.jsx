@@ -567,9 +567,10 @@ const Messages = () => {
     const dx = touch.clientX - state.x;
     const dy = touch.clientY - state.y;
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) clearTimeout(holdTimerRef.current);
-    if (state.type !== "call" && !state.swiping && dx > 12 && Math.abs(dx) > Math.abs(dy) * 1.5 && !selecting) state.swiping = true;
+    // either direction replies, like WhatsApp
+    if (state.type !== "call" && !state.swiping && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.5 && !selecting) state.swiping = true;
     if (state.swiping) {
-      state.dx = Math.max(0, Math.min(SWIPE_MAX_PX, dx));
+      state.dx = Math.max(-SWIPE_MAX_PX, Math.min(SWIPE_MAX_PX, dx));
       setSwipe({ id: state.id, dx: state.dx });
     }
   };
@@ -580,7 +581,7 @@ const Messages = () => {
     // after a long press or a swipe the browser may still send a "click" at that spot, where the
     // reaction bar has just appeared: cancel it so it cannot pick an emoji or undo the selection
     if ((state?.held || state?.swiping) && event?.cancelable) event.preventDefault();
-    if (type !== "call" && state?.swiping && state.dx >= SWIPE_REPLY_PX) {
+    if (type !== "call" && state?.swiping && Math.abs(state.dx) >= SWIPE_REPLY_PX) {
       navigator.vibrate?.(15);
       requestReply(data);
     }
@@ -1020,8 +1021,12 @@ const Messages = () => {
                   </button>
                 )}
                 <div className="message-action-anchor">
-                  {dx > 0 && (
-                    <span className="swipe-reply-hint" style={{ opacity: Math.min(1, dx / SWIPE_REPLY_PX) }} aria-hidden="true">
+                  {dx !== 0 && (
+                    <span
+                      className={`swipe-reply-hint ${dx < 0 ? "is-right" : ""}`}
+                      style={{ opacity: Math.min(1, Math.abs(dx) / SWIPE_REPLY_PX) }}
+                      aria-hidden="true"
+                    >
                       <FiCornerUpLeft />
                     </span>
                   )}

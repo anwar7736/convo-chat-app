@@ -937,6 +937,11 @@ form:has(> .print-container),
   transform: translateY(-50%);
 }
 
+.swipe-reply-hint.is-right {
+  right: -30px;
+  left: auto;
+}
+
 .message-action-anchor {
   position: relative;
 }

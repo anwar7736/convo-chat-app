@@ -1019,6 +1019,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           return;
         }
         const params = new URLSearchParams({ ticket: ticket || "", is_group: isGroup ? "1" : "0", callback: isVideo ? "video" : "voice" });
+        window.__convoLoggingOut = true; // deliberate reload: no "leave site?" prompt
         window.location.assign(`/?${params.toString()}`);
       }
     };

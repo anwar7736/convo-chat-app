@@ -22,7 +22,7 @@ import {
   socket_connection,
 } from "./helpers/helper";
 import { draftKey, getDraft, setDraft } from "./helpers/drafts";
-import useBackToClose, { afterHistorySettles } from "./helpers/useBackToClose";
+import useBackToClose, { afterHistorySettles, dropHistoryEntry } from "./helpers/useBackToClose";
 let socket = socket_connection();
 
 // must match the upload route (Vercel accepts request bodies up to about 4.5 MB)
@@ -356,9 +356,24 @@ const Home = () => {
         if (!layered) addExitGuard();
       }, 80);
     };
+    // Chrome's back button skips history entries a page added before the person touched it. The guard added on
+    // load is such an entry, so Back could slip past it and close the app silently. On the first tap, swap it
+    // for one added by a real gesture (back one step, then push again; the entry count stays the same).
+    const regripEvents = ["pointerup", "click", "keydown"];
+    const regripGuard = () => {
+      regripEvents.forEach((name) => document.removeEventListener(name, regripGuard, true));
+      const state = window.history.state || {};
+      const bareGuard = state.convoExitGuard && !state.convoChat && !state.dialogDepth && !state.callScreen &&
+        !state.chatPreview && !state.nicknamesDialog && !state.nicknameEditor;
+      if (!bareGuard || allowAppExitRef.current || window.__convoBackPending) return;
+      dropHistoryEntry();
+      afterHistorySettles(addExitGuard);
+    };
+    regripEvents.forEach((name) => document.addEventListener(name, regripGuard, true));
     window.addEventListener("popstate", handleBack);
     window.addEventListener("popstate", restoreGuard);
     return () => {
+      regripEvents.forEach((name) => document.removeEventListener(name, regripGuard, true));
       window.removeEventListener("popstate", handleBack);
       window.removeEventListener("popstate", restoreGuard);
       if (window.history.state?.convoExitGuard) {

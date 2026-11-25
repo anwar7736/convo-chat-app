@@ -130,6 +130,7 @@ export default function CallsTab({ setConversationLoading, onOpenConversation })
   };
 
   const startCall = async (log, isVideo) => {
+    window.__convoSkipAutofocusUntil = Date.now() + 5000; // calling from the log: no keyboard
     await openConversation(log);
     // small delay so UserContext propagates before CallControls reads it
     setTimeout(() => window.dispatchEvent(new CustomEvent("chat:call-log-action", { detail: { isVideo } })), 350);

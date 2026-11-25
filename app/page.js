@@ -503,6 +503,7 @@ const Home = () => {
         const ticket = result.data.find((item) => item._id === ticketId && Number(item.is_group) === Number(isGroup));
         if (!ticket) throw new Error("This conversation is unavailable.");
         if (cancelled) return;
+        if (callback === "voice" || callback === "video") window.__convoSkipAutofocusUntil = Date.now() + 5000;
         setUser(ticket);
         setMessages([]);
         setCallLogs([]);
@@ -1033,6 +1034,8 @@ const Home = () => {
     setReplyTarget(null);
     // focus the input whenever a conversation is opened, including on phone PWA
     if (!user?._id) return;
+    // a conversation opened only to place a call (from the call log) does not raise the keyboard
+    if (Date.now() < (window.__convoSkipAutofocusUntil || 0)) return;
     const focusInput = () => messageInputRef.current?.focus();
     focusInput();
     // phone PWA: the input may not be in the DOM/visible yet right after the tab switch, so retry briefly

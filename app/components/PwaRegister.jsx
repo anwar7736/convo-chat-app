@@ -16,6 +16,10 @@ export default function PwaRegister() {
         window.dispatchEvent(new CustomEvent("chat:call-action", { detail: event.data }));
         return;
       }
+      if (event.data?.type === "refresh-conversations") {
+        window.dispatchEvent(new Event("chat:refresh-conversations"));
+        return;
+      }
       const url = event.data?.type === "open-url" ? String(event.data.url || "") : "";
       if (url.startsWith("/") && !url.startsWith("//")) {
         window.__convoLoggingOut = true; // this reload is deliberate: no "leave site?" prompt

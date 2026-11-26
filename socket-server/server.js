@@ -94,6 +94,76 @@ app.post("/call-reject", express.text({ type: "*/*", limit: "2kb" }), (request, 
   response.status(done ? 200 : 404).json({ success: done });
 });
 
+// Notification buttons (Reply / Mark as read) used while the app is closed: the service worker has done the saving
+// through the app's own API and asks this server to tell the other people, exactly like the app does over its socket.
+// The same checks as the socket events: the token's user must be the sender / the actor, seen events must be signed.
+app.options("/sw-relay", (request, response) => {
+  const origin = request.headers.origin;
+  if (isAllowedOrigin(origin) && origin) response.setHeader("Access-Control-Allow-Origin", origin);
+  response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  response.status(204).end();
+});
+app.post("/sw-relay", express.text({ type: "*/*", limit: "64kb" }), (request, response) => {
+  const origin = request.headers.origin;
+  if (!isAllowedOrigin(origin)) return response.status(403).json({ success: false });
+  if (origin) response.setHeader("Access-Control-Allow-Origin", origin);
+  const body = parsePayload(request.body);
+  const userId = decodeSocketToken(body?.token);
+  if (!userId) return response.status(401).json({ success: false });
+  const payload = body.payload;
+  if (body.kind === "message") {
+    if (payload?.sender_id !== userId || !isObjectId(payload.receiver_id)) return response.status(400).json({ success: false });
+    const isGroup = payload.is_group == 1;
+    if (isGroup && !Array.isArray(payload.recipient_ids)) return response.status(400).json({ success: false });
+    const recipients = isGroup ? payload.recipient_ids : [payload.receiver_id];
+    io.to(roomsFor([userId, ...recipients])).emit("private-message", {
+      sender_id: userId,
+      receiver_id: payload.receiver_id,
+      is_group: isGroup ? 1 : 0,
+    });
+    return response.json({ success: true });
+  }
+  if (body.kind === "seen") {
+    const secret =
+      process.env.AUTH_SECRET ||
+      (process.env.NODE_ENV !== "production" && "local-development-only-secret-change-before-deploy");
+    const { signature, issuedAt, ...event } = payload || {};
+    if (
+      !secret ||
+      typeof signature !== "string" ||
+      !Number.isSafeInteger(issuedAt) ||
+      Math.abs(Date.now() - issuedAt) > 30_000 ||
+      event?.actor_id !== userId ||
+      !Array.isArray(event.message_ids) ||
+      !event.message_ids.length ||
+      event.message_ids.length > 200 ||
+      event.message_ids.some((id) => !isObjectId(id)) ||
+      !Array.isArray(event.recipient_ids) ||
+      !event.recipient_ids.length ||
+      event.recipient_ids.length > MAX_RECIPIENTS ||
+      event.recipient_ids.some((id) => !isObjectId(id))
+    ) return response.status(400).json({ success: false });
+    try {
+      const expected = createHmac("sha256", secret).update(JSON.stringify({ event, issuedAt })).digest();
+      const provided = Buffer.from(signature, "base64url");
+      if (expected.length !== provided.length || !timingSafeEqual(expected, provided)) {
+        return response.status(400).json({ success: false });
+      }
+    } catch {
+      return response.status(400).json({ success: false });
+    }
+    io.to(roomsFor(event.recipient_ids)).emit("messages-seen", {
+      actor_id: userId,
+      actor_name: String(event.actor_name || "Someone").slice(0, 80),
+      actor_photo: String(event.actor_photo || "").slice(0, 180),
+      message_ids: event.message_ids,
+    });
+    return response.json({ success: true });
+  }
+  return response.status(400).json({ success: false });
+});
+
 function decodeSession(cookieHeader) {
   const token = (cookieHeader || "")
     .split(";")

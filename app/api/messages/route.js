@@ -377,6 +377,7 @@ export async function POST(request) {
     ticket: String(ticketId),
     isGroup: isGroup ? 1 : 0,
     badge: unreadByUser.get(recipientId) || 0,
+    socketUrl: process.env.NEXT_PUBLIC_SOCKET_URL || "",
   })).catch((error) => console.error("Unable to prepare a Web Push notification:", error));
   });
 

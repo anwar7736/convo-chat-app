@@ -130,10 +130,75 @@ self.addEventListener("push", (event) => {
       tag: payload.tag || "convo-message",
       vibrate: [120, 60, 120],
       timestamp: Date.now(),
-      data: { url: payload.url || "/", ticket: payload.ticket || "", isGroup: payload.isGroup ? 1 : 0 },
+      // like WhatsApp: Reply (typed right in the notification where the phone supports it), Mark as read, Mute
+      actions: payload.ticket ? [
+        { action: "reply", title: "Reply", type: "text", placeholder: "Type a reply" },
+        { action: "mark-read", title: "Mark as read" },
+        { action: "mute", title: "Mute" },
+      ] : [],
+      data: {
+        url: payload.url || "/",
+        ticket: payload.ticket || "",
+        isGroup: payload.isGroup ? 1 : 0,
+        kind: "message",
+        socketUrl: payload.socketUrl || "",
+      },
     });
   })());
 });
+
+// Reply / Mark as read / Mute straight from a message notification, without opening the app. Everything goes through
+// the app's own API (same session cookie); the socket server is then told, so people with the app open see it live.
+async function relayToSocketServer(data, kind, payload) {
+  if (!data.socketUrl) return;
+  try {
+    const tokenResponse = await fetch("/api/socket-token", { cache: "no-store" });
+    const { token } = await tokenResponse.json();
+    if (!token) return;
+    await fetch(`${data.socketUrl}/sw-relay`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ token, kind, payload }),
+    });
+  } catch {
+    // the other side sees it on its next refresh
+  }
+}
+
+async function runMessageAction(action, data, reply) {
+  const ticket = data.ticket;
+  const isGroup = data.isGroup ? 1 : 0;
+  if (action === "reply") {
+    const text = String(reply || "").trim();
+    if (!text) return false;
+    const response = await fetch("/api/messages", {
+      method: "POST",
+      body: JSON.stringify({ message: text, receiver_id: ticket, is_group: isGroup, type: "text" }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) return false;
+    await relayToSocketServer(data, "message", result.data);
+    // reading the chat to reply means the earlier messages are read too
+    await runMessageAction("mark-read", data);
+    return true;
+  }
+  if (action === "mark-read") {
+    const response = await fetch(`/api/messages?ref_id=${encodeURIComponent(ticket)}&is_group=${isGroup}`, { cache: "no-store" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) return false;
+    for (const event of result.seen_events || []) await relayToSocketServer(data, "seen", event);
+    return true;
+  }
+  if (action === "mute") {
+    const response = await fetch("/api/conversations/preferences", {
+      method: "POST",
+      body: JSON.stringify({ conversation_id: ticket, is_group: isGroup, action: "mute" }),
+    });
+    const result = await response.json().catch(() => ({}));
+    return response.ok && result.success;
+  }
+  return false;
+}
 
 // Tapping a notification opens that chat: in the open app if there is one, otherwise in a new window.
 // (Signed out: the app sends the user to sign in and back to this chat afterwards.)
@@ -144,6 +209,44 @@ self.addEventListener("notificationclick", (event) => {
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     return windows.find((item) => new URL(item.url).origin === self.location.origin);
   };
+
+  // buttons on message notifications: done right here, the app is not opened. (A Reply button that shows no text box
+  // on this phone has nothing typed: it falls through to opening the chat, like tapping the notification.)
+  const typedReply = String(event.reply || "").trim();
+  if (opened.kind === "message" && (event.action === "mark-read" || event.action === "mute" || (event.action === "reply" && typedReply))) {
+    event.waitUntil((async () => {
+      let done = false;
+      try {
+        done = await runMessageAction(event.action, opened, typedReply);
+      } catch {
+        done = false;
+      }
+      if (!done) {
+        if (event.action === "reply") {
+          await self.registration.showNotification("Reply not sent", {
+            body: "Tap to open the chat and send it there.",
+            icon: "/icons/icon.svg",
+            badge: "/icons/icon.svg",
+            tag: `reply-failed-${opened.ticket}`,
+            data: { url: opened.url || "/", ticket: opened.ticket, isGroup: opened.isGroup },
+          });
+        }
+        return;
+      }
+      // this chat's notifications go away; the app icon count drops when nothing is left
+      const shown = await self.registration.getNotifications();
+      shown
+        .filter((item) => item.data?.ticket === opened.ticket && item.data?.isGroup === opened.isGroup)
+        .forEach((item) => item.close());
+      const remaining = shown.filter((item) => item.data?.ticket !== opened.ticket || item.data?.isGroup !== opened.isGroup);
+      if (!remaining.length && typeof self.navigator.clearAppBadge === "function") {
+        try { await self.navigator.clearAppBadge(); } catch { /* not supported here */ }
+      }
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      windows.forEach((client) => client.postMessage({ type: "refresh-conversations" }));
+    })());
+    return;
+  }
 
   // buttons on call notifications. The open app answers them straight away (no reload, the call is not
   // disturbed); when the app is closed it is opened with the action in the address, and applies it as soon

@@ -176,6 +176,11 @@ const Messages = () => {
       }
     };
     const refreshCallLogs = () => loadCallLogs();
+    // a call placed from the call log starts before this chat has loaded: its entry is saved while the chat's own
+    // history is still on its way, so look again a few times while that call is live
+    const catchUpTimers = window.__convoLiveCall
+      ? [1000, 2500, 5000].map((ms) => setTimeout(loadCallLogs, ms))
+      : [];
     const onCallLogDeleted = ({ callId }) => {
       setCallLogs((current) => (current || []).filter((item) => item?.callId !== callId));
       window.dispatchEvent(new Event("chat:refresh-conversations"));
@@ -184,6 +189,7 @@ const Messages = () => {
     socket.on("call-log-deleted", onCallLogDeleted);
     return () => {
       active = false;
+      catchUpTimers.forEach(clearTimeout);
       window.removeEventListener("chat:refresh-call-logs", refreshCallLogs);
       socket.off("call-log-deleted", onCallLogDeleted);
     };

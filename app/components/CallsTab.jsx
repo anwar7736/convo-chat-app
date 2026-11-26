@@ -144,7 +144,7 @@ export default function CallsTab({ setConversationLoading, onOpenConversation })
         },
       },
     }));
-    openConversation(log);
+    openConversation(log).then(() => window.dispatchEvent(new Event("chat:refresh-call-logs")));
   };
 
   if (loading) {

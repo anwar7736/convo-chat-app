@@ -522,6 +522,7 @@ const Home = () => {
         if (cancelled) return;
         setMessages(timeline.messages);
         setCallLogs(timeline.callLogs);
+        if (callback === "voice" || callback === "video") window.dispatchEvent(new Event("chat:refresh-call-logs"));
         window.history.replaceState(window.history.state, "", "/");
       } catch (error) {
         if (!cancelled) {

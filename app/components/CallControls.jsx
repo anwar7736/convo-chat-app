@@ -277,6 +277,9 @@ export default function CallControls({ conversation: conversationProp, currentUs
       if (!response.ok || !result.success) throw new Error(result.message || "Unable to update call history.");
       if (result.socket_event) socket.emit("call-log-updated", result.socket_event);
       window.dispatchEvent(new Event("chat:refresh-call-logs"));
+      // a call placed before its chat finished opening: that chat's own load can land after this refresh and hide
+      // the new entry, so refresh once more shortly after
+      setTimeout(() => window.dispatchEvent(new Event("chat:refresh-call-logs")), 1500);
       return true;
     } catch (error) {
       console.error("Unable to save call history:", error);

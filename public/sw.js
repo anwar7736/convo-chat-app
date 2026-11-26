@@ -142,6 +142,7 @@ self.addEventListener("push", (event) => {
         isGroup: payload.isGroup ? 1 : 0,
         kind: "message",
         socketUrl: payload.socketUrl || "",
+        messageId: payload.messageId || "",
       },
     });
   })());
@@ -171,10 +172,14 @@ async function runMessageAction(action, data, reply) {
   if (action === "reply") {
     const text = String(reply || "").trim();
     if (!text) return false;
-    const response = await fetch("/api/messages", {
+    const send = (replyTo) => fetch("/api/messages", {
       method: "POST",
-      body: JSON.stringify({ message: text, receiver_id: ticket, is_group: isGroup, type: "text" }),
+      body: JSON.stringify({ message: text, receiver_id: ticket, is_group: isGroup, type: "text", reply_to: replyTo || undefined }),
     });
+    // sent as a reply to the message the notification is about (quoted), like replying inside the chat;
+    // if that message can no longer be quoted (deleted), it goes as an ordinary message instead of failing
+    let response = await send(data.messageId);
+    if (response.status === 400 && data.messageId) response = await send("");
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.success) {
       throw new Error(`${response.status} ${result.message || "the server refused the message"}`);

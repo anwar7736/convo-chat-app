@@ -1785,6 +1785,10 @@ form:has(> .print-container),
 .call-screen.is-self-preview .call-hero {
   display: none;
 }
+/* with the hero gone nothing pushes the controls down: keep them at the bottom */
+.call-screen.is-self-preview .call-actions {
+  margin-top: auto;
+}
 .call-screen.is-self-preview .call-top-bar::before {
   content: "";
   position: absolute;
@@ -2752,7 +2756,7 @@ button.nickname-person:hover {
 }
 
 .call-top-info .call-muted-pill {
-  margin-top: 4px;
+  margin-top: 7px;
   padding: 3px 10px;
   font-size: 12px;
 }

@@ -122,12 +122,28 @@ self.addEventListener("push", (event) => {
       return;
     }
 
-    await self.registration.showNotification(payload.title || "New message", {
-      body: payload.body || "You have a new message.",
+    // one notification per chat, like WhatsApp: a new message joins the one already showing for that chat (the last
+    // few lines stacked, a count in the title) and Reply goes to the newest message
+    const chatTag = payload.tag || "convo-message";
+    let lines = [payload.body || "You have a new message."];
+    let count = 1;
+    try {
+      const existing = (await self.registration.getNotifications({ tag: chatTag }))[0];
+      if (existing?.data?.kind === "message") {
+        lines = [...(existing.data.lines || []), ...lines].slice(-5);
+        count = (existing.data.count || 1) + 1;
+      }
+    } catch {
+      // show just this message
+    }
+    const baseTitle = payload.title || "New message";
+    await self.registration.showNotification(count > 1 ? `${baseTitle} (${count} messages)` : baseTitle, {
+      body: lines.join("\n"),
       icon: "/icons/icon.svg",
       badge: "/icons/icon.svg",
       silent: false,
-      tag: payload.tag || "convo-message",
+      tag: chatTag,
+      renotify: true,
       vibrate: [120, 60, 120],
       timestamp: Date.now(),
       // like WhatsApp: Reply (typed right in the notification where the phone supports it), Mark as read, Mute
@@ -143,6 +159,8 @@ self.addEventListener("push", (event) => {
         kind: "message",
         socketUrl: payload.socketUrl || "",
         messageId: payload.messageId || "",
+        lines,
+        count,
       },
     });
   })());

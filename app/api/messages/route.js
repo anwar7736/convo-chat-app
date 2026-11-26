@@ -372,8 +372,8 @@ export async function POST(request) {
     title: isGroup ? `${senderName} @ ${groupInfo?.name || "Group"}` : senderName,
     body: notificationBody.slice(0, 180),
     url: `/?ticket=${encodeURIComponent(ticketId)}&is_group=${isGroup ? "1" : "0"}`,
-    // one notification per message (so the launcher can count them); ticket says which chat it belongs to
-    tag: `message-${ticketId}-${message._id}`,
+    // one notification per chat, like WhatsApp: new messages join it (the service worker stacks them)
+    tag: `chat-${ticketId}`,
     ticket: String(ticketId),
     isGroup: isGroup ? 1 : 0,
     badge: unreadByUser.get(recipientId) || 0,

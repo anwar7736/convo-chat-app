@@ -1,8 +1,23 @@
 import { sendNotification, setVapidDetails } from "web-push";
+import mongoose from "mongoose";
 import { pushSubscriptionSchema } from "@/app/models/pushSubscriptionModel";
+import { userSchema } from "@/app/models/userModel";
 
 let vapidConfigured = false;
 let missingVapidWarningLogged = false;
+
+// recipient id -> the nickname that recipient gave `subjectId` (only those who gave one)
+export async function nicknamesGivenTo(recipientIds, subjectId) {
+  const result = new Map();
+  if (!recipientIds.length) return result;
+  const holders = await userSchema.find({ _id: { $in: recipientIds.map((id) => new mongoose.Types.ObjectId(id)) } })
+    .select("nicknames").lean().catch(() => []);
+  for (const holder of holders) {
+    const map = holder.nicknames instanceof Map ? Object.fromEntries(holder.nicknames) : holder.nicknames || {};
+    if (map[subjectId]) result.set(String(holder._id), String(map[subjectId]));
+  }
+  return result;
+}
 
 export function getVapidPublicKey() {
   return process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "";

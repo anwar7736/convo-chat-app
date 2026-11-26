@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 import { mongoDB_connect } from "@/app/helpers/helper";
 import { getSessionUserId } from "@/app/lib/session";
-import { sendPushNotification } from "@/app/lib/pushNotifications";
+import { nicknamesGivenTo, sendPushNotification } from "@/app/lib/pushNotifications";
 import { groupMemberSchema } from "@/app/models/groupMemberModel";
 import { groupSchema } from "@/app/models/groupModel";
 import { userSchema } from "@/app/models/userModel";
@@ -71,10 +71,11 @@ export async function POST(request) {
   const ticketId = isGroup ? conversationId : userId;
   const unreadByUser = await getUnreadNotificationCounts(recipients);
   const ringCallId = /^[a-f\d-]{36}$/i.test(String(body?.call_id || "")) ? String(body.call_id) : "";
+  const nicknameBy = isGroup ? new Map() : await nicknamesGivenTo(recipients, userId);
   await sendPushNotification(recipients, (recipientId) => ({
     type: "call-missed",
     title: `Missed ${isVideo ? "Video" : "Voice"} Call`,
-    body: groupName ? `${caller?.name || "Someone"} @ ${groupName}` : caller?.name || "Someone called you",
+    body: groupName ? `${caller?.name || "Someone"} @ ${groupName}` : nicknameBy.get(recipientId) || caller?.name || "Someone called you",
     url: `/?ticket=${ticketId}&is_group=${isGroup ? "1" : "0"}`,
     tag: `call-${ticketId}`,
     badge: unreadByUser.get(recipientId) || 0,

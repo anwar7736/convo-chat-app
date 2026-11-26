@@ -1137,7 +1137,7 @@ export default function CallControls({ conversation: conversationProp, currentUs
       {
         body: incoming.conversationName && incoming.conversationName !== incoming.callerName
           ? `${incoming.callerName} @ ${incoming.conversationName}`
-          : incoming.callerName,
+          : personFor(incoming.callerId)?.nickname || incoming.callerName,
         icon: "/icons/icon.svg",
         silent: false,
         tag,
@@ -1178,7 +1178,9 @@ export default function CallControls({ conversation: conversationProp, currentUs
         }
         const activeCall = callRef.current;
         if (!activeCall || activeCall.callId !== notificationCallId) return;
-        const name = activeCall.isGroup || activeCall.isCaller ? activeCall.conversationName : activeCall.callerName;
+        const name = activeCall.isGroup || activeCall.isCaller
+          ? activeCall.conversationName
+          : personFor(activeCall.callerId)?.nickname || activeCall.callerName;
         const status = activeCall.connectedAt
           ? formatTime(Math.floor((Date.now() - activeCall.connectedAt) / 1000))
           : activeCall.status === "ringing" ? "Ringing" : activeCall.status === "connecting" ? "Connecting" : "Calling";

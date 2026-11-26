@@ -368,8 +368,18 @@ export async function POST(request) {
     isGroup ? groupSchema.findById(receiverId).select("name").lean() : null,
   ]).catch(() => [null, null]);
   const senderName = senderInfo?.name || "New message";
+  // in a direct chat each person sees the nickname they gave the sender, as in the app
+  const nicknameBy = new Map();
+  if (!isGroup && pushRecipients.length) {
+    const holders = await userSchema.find({ _id: { $in: pushRecipients.map((id) => new mongoose.Types.ObjectId(id)) } })
+      .select("nicknames").lean().catch(() => []);
+    for (const holder of holders) {
+      const map = holder.nicknames instanceof Map ? Object.fromEntries(holder.nicknames) : holder.nicknames || {};
+      if (map[sessionUserId]) nicknameBy.set(String(holder._id), String(map[sessionUserId]));
+    }
+  }
   await sendPushNotification(pushRecipients, (recipientId) => ({
-    title: isGroup ? `${senderName} @ ${groupInfo?.name || "Group"}` : senderName,
+    title: isGroup ? `${senderName} @ ${groupInfo?.name || "Group"}` : nicknameBy.get(recipientId) || senderName,
     body: notificationBody.slice(0, 180),
     url: `/?ticket=${encodeURIComponent(ticketId)}&is_group=${isGroup ? "1" : "0"}`,
     // one notification per chat, like WhatsApp: new messages join it (the service worker stacks them)

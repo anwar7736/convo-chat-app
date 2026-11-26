@@ -176,10 +176,16 @@ async function runMessageAction(action, data, reply) {
       body: JSON.stringify({ message: text, receiver_id: ticket, is_group: isGroup, type: "text" }),
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok || !result.success) return false;
+    if (!response.ok || !result.success) {
+      throw new Error(`${response.status} ${result.message || "the server refused the message"}`);
+    }
     await relayToSocketServer(data, "message", result.data);
-    // reading the chat to reply means the earlier messages are read too
-    await runMessageAction("mark-read", data);
+    // reading the chat to reply means the earlier messages are read too; the reply itself is already sent
+    try {
+      await runMessageAction("mark-read", data);
+    } catch {
+      // not important
+    }
     return true;
   }
   if (action === "mark-read") {
@@ -216,15 +222,17 @@ self.addEventListener("notificationclick", (event) => {
   if (opened.kind === "message" && (event.action === "mark-read" || event.action === "mute" || (event.action === "reply" && typedReply))) {
     event.waitUntil((async () => {
       let done = false;
+      let reason = "";
       try {
         done = await runMessageAction(event.action, opened, typedReply);
-      } catch {
+      } catch (error) {
         done = false;
+        reason = String(error?.message || error || "").slice(0, 120);
       }
       if (!done) {
         if (event.action === "reply") {
           await self.registration.showNotification("Reply not sent", {
-            body: "Tap to open the chat and send it there.",
+            body: `${reason ? `${reason}. ` : ""}Tap to open the chat and send it there.`,
             icon: "/icons/icon.svg",
             badge: "/icons/icon.svg",
             tag: `reply-failed-${opened.ticket}`,

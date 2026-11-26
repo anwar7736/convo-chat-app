@@ -131,9 +131,20 @@ export default function CallsTab({ setConversationLoading, onOpenConversation })
 
   const startCall = async (log, isVideo) => {
     window.__convoSkipAutofocusUntil = Date.now() + 5000; // calling from the log: no keyboard
-    await openConversation(log);
-    // small delay so UserContext propagates before CallControls reads it
-    setTimeout(() => window.dispatchEvent(new CustomEvent("chat:call-log-action", { detail: { isVideo } })), 350);
+    // the call screen opens at once with this person; their chat opens alongside, not before
+    window.dispatchEvent(new CustomEvent("chat:call-log-action", {
+      detail: {
+        isVideo,
+        target: {
+          _id: log.conversationId,
+          name: log.name,
+          nickname: log.nickname || "",
+          photo: log.photo,
+          is_group: log.isGroup ? 1 : 0,
+        },
+      },
+    }));
+    openConversation(log);
   };
 
   if (loading) {

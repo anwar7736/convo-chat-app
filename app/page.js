@@ -507,16 +507,22 @@ const Home = () => {
         setUser(ticket);
         setMessages([]);
         setCallLogs([]);
+        if (callback === "voice" || callback === "video") {
+          // Call Back: ring as soon as the connection is up, while the chat is still loading
+          const startedAt = Date.now();
+          const ring = () => {
+            if (socket.connected || Date.now() - startedAt > 6000) {
+              window.dispatchEvent(new CustomEvent("chat:call-log-action", { detail: { isVideo: callback === "video", target: ticket } }));
+            } else setTimeout(ring, 100);
+          };
+          ring();
+        }
         const timeline = await loadConversationTimeline(ticket);
         if (!Array.isArray(timeline.messages)) throw new Error("Unable to load messages.");
         if (cancelled) return;
         setMessages(timeline.messages);
         setCallLogs(timeline.callLogs);
         window.history.replaceState(window.history.state, "", "/");
-        if (callback === "voice" || callback === "video") {
-          // small delay so the call screen has the opened conversation before it is asked to call
-          setTimeout(() => window.dispatchEvent(new CustomEvent("chat:call-log-action", { detail: { isVideo: callback === "video" } })), 500);
-        }
       } catch (error) {
         if (!cancelled) {
           console.error("Unable to open the notification conversation:", error);

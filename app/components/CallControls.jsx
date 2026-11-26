@@ -3,6 +3,8 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FaVideo } from "react-icons/fa";
+import { FiUserPlus } from "react-icons/fi";
+import useBackToClose from "../helpers/useBackToClose";
 import { FiArrowLeft, FiBluetooth, FiCheck, FiHeadphones, FiMic, FiMicOff, FiPhone, FiPhoneOff, FiRefreshCw, FiSmartphone, FiVideo, FiVideoOff, FiVolume2 } from "react-icons/fi";
 import { MdAddIcCall } from "react-icons/md";
 import { toast } from "sonner";
@@ -139,7 +141,8 @@ function useTone(kind, playing, loop = true) {
   }, [kind, playing, loop]);
 }
 
-export default function CallControls({ conversation, currentUser, showButtons = true, blocked = false }) {
+export default function CallControls({ conversation: conversationProp, currentUser, showButtons = true, blocked = false }) {
+  const conversation = conversationProp;
   const { users } = useContext(UserListContext) || {};
   const [incoming, setIncoming] = useState(null);
   const [call, setCall] = useState(null);
@@ -168,6 +171,12 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const [cameraOff, setCameraOff] = useState(false);
   const [facingMode, setFacingMode] = useState("user");
   const [localVideoExpanded, setLocalVideoExpanded] = useState(false);
+  // "add participant": pick people from the contact list to ring into the running call
+  const [addPickerOpen, setAddPickerOpen] = useState(false);
+  const [addSearch, setAddSearch] = useState("");
+  const [addSelected, setAddSelected] = useState([]);
+  const [addingPeople, setAddingPeople] = useState(false);
+  useBackToClose(addPickerOpen, () => setAddPickerOpen(false));
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [callMinimized, setCallMinimized] = useState(false);
   const [controlsHidden, setControlsHidden] = useState(false);
@@ -252,6 +261,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     setLocalVideoExpanded(false);
     setCallMinimized(false);
     setRemoteMedia({});
+    setAddPickerOpen(false);
+    setAddSelected([]);
+    setAddSearch("");
   }, []);
 
   const updateCallLog = async (callId, action, details) => {
@@ -746,10 +758,12 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     });
   }, []);
 
-  const startCall = async (video) => {
+  // `target`: call this person/group without waiting for their chat to be opened (call log, Call Back button)
+  const startCall = async (video, target) => {
+    const conversation = target || conversationProp;
     window.dispatchEvent(new Event("chat:scroll-bottom")); // same as pressing the scroll-to-bottom arrow
     if (!conversation?._id || !currentUser?._id || busy || callRef.current || incomingRef.current) return;
-    if (blocked) {
+    if (!target && blocked) {
       toast.error("Unblock this contact before calling.");
       return;
     }
@@ -887,7 +901,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
 
   useEffect(() => {
     const onCallLogAction = (event) => {
-      const { callId, isVideo } = event.detail || {};
+      const { callId, isVideo, target } = event.detail || {};
       const activeCall = callRef.current;
       if (activeCall) {
         if (activeCall.callId === callId) setCallMinimized(false);
@@ -898,7 +912,8 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         toast.info("Answer or decline the incoming call before calling back.");
         return;
       }
-      if (conversation?._id) startCallRef.current?.(Boolean(isVideo));
+      if (target?._id) startCallRef.current?.(Boolean(isVideo), target);
+      else if (conversation?._id) startCallRef.current?.(Boolean(isVideo));
     };
     window.addEventListener("chat:call-log-action", onCallLogAction);
     return () => window.removeEventListener("chat:call-log-action", onCallLogAction);
@@ -965,6 +980,38 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     });
   };
 
+  /* ---------- add participant ---------- */
+  const alreadyInCall = new Set([
+    String(currentUser?._id),
+    ...Object.keys(remoteStreams),
+    ...(call && !call.isGroup ? [String(call.isCaller ? call.conversationId : call.callerId)] : []),
+  ]);
+  const addCandidates = (Array.isArray(users) ? users : []).filter((person) =>
+    Number(person?.is_group) !== 1 && !person?.is_self && !alreadyInCall.has(String(person?._id)) &&
+    (!addSearch.trim() || `${person?.nickname || ""} ${person?.name || ""}`.toLowerCase().includes(addSearch.trim().toLowerCase())));
+  const submitAddPeople = () => {
+    const active = callRef.current;
+    if (!active || !addSelected.length || addingPeople) return;
+    setAddingPeople(true);
+    socket.emit("call:add", { callId: active.callId, recipients: addSelected }, (result) => {
+      setAddingPeople(false);
+      if (!result?.ok) {
+        toast.error("Unable to add people to this call.");
+        return;
+      }
+      const nameOf = (id) => personFor(id)?.nickname || personFor(id)?.name || "Someone";
+      if (result.added?.length) toast.success(`Calling ${result.added.map(nameOf).join(", ")}…`);
+      if (result.busy?.length) toast.info(`${result.busy.map(nameOf).join(", ")} is on another call.`);
+      if (result.offline?.length) toast.info(`${result.offline.map(nameOf).join(", ")} is offline.`);
+      if (result.full) toast.info("This call is full.");
+      if (result.added?.length || result.busy?.length || result.offline?.length || result.full) {
+        setAddPickerOpen(false);
+        setAddSelected([]);
+        setAddSearch("");
+      }
+    });
+  };
+
   /* ---------- buttons on call notifications: Accept / Reject / Hang Up / Call Back ---------- */
   const pendingCallActionRef = useRef(null); // { action, callId, at }: waits for that call to reach this screen
   const [callActionTick, setCallActionTick] = useState(0);
@@ -1016,6 +1063,13 @@ export default function CallControls({ conversation, currentUser, showButtons = 
         }
         if (conversation?._id && String(conversation._id) === String(ticket) && Number(conversation.is_group) === Number(isGroup)) {
           startCallRef.current?.(Boolean(isVideo));
+          return;
+        }
+        // the app is open: call straight away, no reload and no waiting for the chat to open
+        const known = personFor(ticket);
+        if (known && Number(known.is_group) === Number(isGroup)) {
+          window.__convoSkipAutofocusUntil = Date.now() + 5000;
+          startCallRef.current?.(Boolean(isVideo), known);
           return;
         }
         const params = new URLSearchParams({ ticket: ticket || "", is_group: isGroup ? "1" : "0", callback: isVideo ? "video" : "voice" });
@@ -1353,6 +1407,14 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       // in a one-to-one call the call:end that follows says it was declined
       if (callRef.current?.callId === callId && callRef.current.isGroup) toast.info("A participant declined the call.");
     };
+    // someone was added: from now on this is a multi-person call (names show on the tiles)
+    const onAdding = ({ callId }) => {
+      const active = callRef.current;
+      if (active?.callId !== callId || active.multi) return;
+      const multiCall = { ...active, multi: true };
+      callRef.current = multiCall;
+      setCall(multiCall);
+    };
     const onRinging = ({ callId }) => {
       if (callRef.current?.callId !== callId || callRef.current.connectedAt) return;
       const ringingCall = { ...callRef.current, status: "ringing" };
@@ -1412,6 +1474,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
     socket.on("call:left", onLeft);
     socket.on("call:rejected", onRejected);
     socket.on("call:ringing", onRinging);
+    socket.on("call:adding", onAdding);
     socket.on("call:accepted", onAccepted);
     socket.on("call:busy", onBusy);
     socket.on("call:unavailable", onUnavailable);
@@ -1431,6 +1494,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
       socket.off("call:left", onLeft);
       socket.off("call:rejected", onRejected);
       socket.off("call:ringing", onRinging);
+      socket.off("call:adding", onAdding);
       socket.off("call:accepted", onAccepted);
       socket.off("call:busy", onBusy);
       socket.off("call:unavailable", onUnavailable);
@@ -1575,6 +1639,9 @@ export default function CallControls({ conversation, currentUser, showButtons = 
   const partnerVideoOn = remoteEntries.some(([id]) => !remoteMedia[id]?.cameraOff);
   const canHideControls = Boolean(showVideoStage) && (localVideoExpanded ? !cameraOff : partnerVideoOn);
   const toggleVideoLayout = () => setLocalVideoExpanded((expanded) => !expanded);
+  // the caller of a video call sees their own camera full screen while it rings; once the partner joins it shrinks
+  // to the small box and the partner takes the big screen
+  const selfPreview = Boolean(call?.isVideo && call.isCaller && !call.isGroup && !showVideoStage);
 
   // The phone Back button on the call screen does what the on-screen ← does: back to the chat, call keeps going
   const callScreenOpen = Boolean(call) && !callMinimized;
@@ -1732,7 +1799,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
           {call && (
             <div
               data-call-screen-open={callMinimized ? undefined : "true"}
-              className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""} ${callMinimized ? "is-minimized" : ""} ${localVideoExpanded ? "is-local-video-expanded" : ""} ${controlsHidden && canHideControls ? "is-controls-hidden" : ""}`}
+              className={`call-screen call-overlay ${showVideoStage ? "has-video" : ""} ${selfPreview ? "is-self-preview" : ""} ${callMinimized ? "is-minimized" : ""} ${localVideoExpanded ? "is-local-video-expanded" : ""} ${controlsHidden && canHideControls ? "is-controls-hidden" : ""}`}
               onClick={(event) => {
                 if (callMinimized || !canHideControls || event.target.closest("button,input,select,label,a,[role=button],[role=menuitem]")) return;
                 setControlsHidden((h) => !h);
@@ -1773,7 +1840,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                       muted={remoteMedia[id]?.muted}
                       cameraOff={remoteMedia[id]?.cameraOff}
                       minimized={callMinimized}
-                      isGroup={call.isGroup}
+                      isGroup={call.isGroup || call.multi || remoteEntries.length > 1}
                     />
                   ))}
                 </div>
@@ -1782,13 +1849,13 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                 <video
                   id="local-call-stream"
                   ref={localVideoRef}
-                  className={`call-self-view ${facingMode === "user" && !cameraOff ? "is-mirrored" : ""} ${cameraOff ? "is-off" : ""} ${localVideoExpanded ? "is-expanded" : ""}`}
+                  className={`call-self-view ${facingMode === "user" && !cameraOff ? "is-mirrored" : ""} ${cameraOff ? "is-off" : ""} ${localVideoExpanded || selfPreview ? "is-expanded" : ""}`}
                   style={{
-                    ...(!localVideoExpanded ? { translate: `${selfViewOffset.x}px ${selfViewOffset.y}px` } : {}),
+                    ...(!localVideoExpanded && !selfPreview ? { translate: `${selfViewOffset.x}px ${selfViewOffset.y}px` } : {}),
                     ...(cameraOff ? { "--cam-off-photo": `url(${getImageURL(currentUser?.photo)})` } : {}),
                   }}
                   onPointerDown={(event) => {
-                    if (localVideoExpanded) return;
+                    if (localVideoExpanded || selfPreview) return;
                     selfViewDragRef.current = { startX: event.clientX, startY: event.clientY, base: selfViewOffset, rect: event.currentTarget.getBoundingClientRect(), moved: false };
                   }}
                   onClickCapture={(event) => {
@@ -1797,7 +1864,7 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                     event.preventDefault();
                     event.stopPropagation();
                   }}
-                  {...swapProps(!localVideoExpanded, "Show your video full screen")}
+                  {...(selfPreview ? {} : swapProps(!localVideoExpanded, "Show your video full screen"))}
                   autoPlay
                   playsInline
                   muted
@@ -1839,9 +1906,75 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                     <div className="call-top-info">
                       <h2 className="call-name">{callName || "Call"}</h2>
                       <p className="call-status">{statusText}</p>
+                      {muted && (
+                        <p className="call-muted-pill"><FiMicOff aria-hidden="true" /> You&apos;re Muted</p>
+                      )}
+                      {(() => {
+                        // who muted their microphone, right under the timer in voice AND video calls
+                        const mutedIds = Object.entries(remoteMedia).filter(([, state]) => state.muted).map(([id]) => id);
+                        if (!mutedIds.length) return null;
+                        const text = call.isGroup
+                          ? `${mutedIds.map((id) => personFor(id)?.nickname || personFor(id)?.name || "Someone").join(", ")} muted`
+                          : "Muted";
+                        return <p className="call-muted-pill"><FiMicOff aria-hidden="true" /> {text}</p>;
+                      })()}
                     </div>
-                    <div className="call-top-spacer" />
+                    {call.connectedAt && call.mediaConnected ? (
+                      <button
+                        type="button"
+                        className="call-minimize-button call-add-button"
+                        onClick={() => setAddPickerOpen(true)}
+                        aria-label="Add participant"
+                        title="Add participant"
+                      >
+                        <FiUserPlus />
+                      </button>
+                    ) : (
+                      <div className="call-top-spacer" />
+                    )}
                   </div>
+
+                  {addPickerOpen && (
+                    <div className="call-add-picker" role="dialog" aria-modal="true" aria-label="Add participant" onClick={(event) => { if (event.target === event.currentTarget) setAddPickerOpen(false); }}>
+                      <div className="call-add-panel">
+                        <div className="call-add-head">
+                          <strong>Add participant</strong>
+                          <button type="button" onClick={() => setAddPickerOpen(false)} aria-label="Close">×</button>
+                        </div>
+                        <input
+                          type="search"
+                          className="call-add-search"
+                          placeholder="Search contacts"
+                          value={addSearch}
+                          onChange={(event) => setAddSearch(event.target.value)}
+                        />
+                        <ul className="call-add-list">
+                          {addCandidates.length === 0 && <li className="call-add-empty">No contacts to add.</li>}
+                          {addCandidates.map((person) => {
+                            const picked = addSelected.includes(String(person._id));
+                            return (
+                              <li key={person._id}>
+                                <button
+                                  type="button"
+                                  className={picked ? "is-picked" : ""}
+                                  onClick={() => setAddSelected((current) => picked
+                                    ? current.filter((id) => id !== String(person._id))
+                                    : [...current, String(person._id)])}
+                                >
+                                  <img src={getImageURL(person.photo)} alt="" />
+                                  <span>{person.nickname || person.name}</span>
+                                  {picked && <FiCheck />}
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                        <button type="button" className="call-add-submit" disabled={!addSelected.length || addingPeople} onClick={submitAddPeople}>
+                          {addingPeople ? "Adding…" : `Call${addSelected.length ? ` (${addSelected.length})` : ""}`}
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   <div className={`call-hero ${showVideoStage ? "is-compact" : ""}`}>
                     <p className="call-kind">{call.isVideo ? "Video Call" : "Voice Call"}{call.isGroup ? ` · ${remoteEntries.length + 1} in call` : ""}</p>
@@ -1850,19 +1983,6 @@ export default function CallControls({ conversation, currentUser, showButtons = 
                         <img src={getImageURL(callPhoto)} alt="" />
                       </div>
                     )}
-                    {muted && (
-                      <p className="call-muted-pill"><FiMicOff aria-hidden="true" /> You&apos;re Muted</p>
-                    )}
-                    {(() => {
-                      // who muted their microphone: shown under the name in voice AND video calls (in a video call
-                      // the tile badge sat behind the control bar)
-                      const mutedIds = Object.entries(remoteMedia).filter(([, state]) => state.muted).map(([id]) => id);
-                      if (!mutedIds.length) return null;
-                      const text = call.isGroup
-                        ? `${mutedIds.map((id) => personFor(id)?.nickname || personFor(id)?.name || "Someone").join(", ")} muted`
-                        : "Muted";
-                      return <p className="call-muted-pill"><FiMicOff aria-hidden="true" /> {text}</p>;
-                    })()}
                     {call.connectedAt && !call.mediaConnected && <p className="call-sub">Connecting audio…</p>}
                     {call.connectedAt && !call.mediaConnected && elapsedSeconds >= 5 && (
                       <p className="call-debug">

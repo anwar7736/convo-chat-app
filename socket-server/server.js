@@ -55,6 +55,8 @@ const CALL_MAX_RING_MS = 10 * 60 * 1000;
 // someone who is offline when called still gets the call for a while: the caller keeps seeing "Ringing",
 // and the invite reaches them if they come online before it runs out
 const CALL_OFFLINE_RING_MS = 60 * 1000;
+// a person added to a call that is already running rings this long
+const CALL_ADD_RING_MS = 45 * 1000;
 // a network switch (Wi-Fi to mobile data) drops the socket for a moment: the person has this long to come back to the call
 const CALL_RECONNECT_MS = 30 * 1000;
 // per socket: a burst of events (a group call sends many ICE candidates at once), then a steady rate
@@ -557,6 +559,42 @@ io.on("connection", (socket) => {
     if (availableRecipients.length) socket.emit("call:ringing", { callId: invite.callId });
   });
 
+  // someone already in the call adds another person (WhatsApp "add participant"): they ring like a new invite and,
+  // once they accept, the existing participant events connect them to everybody
+  socket.on("call:add", (data, ack) => {
+    const reply = typeof ack === "function" ? ack : () => {};
+    const payload = parsePayload(data);
+    const call = calls.get(payload?.callId);
+    if (!call?.accepted.has(userId) || call.sockets.get(userId) !== socket.id || call.accepted.size < 2) {
+      return reply({ ok: false, reason: "not-in-call" });
+    }
+    const wanted = (Array.isArray(payload.recipients) ? payload.recipients : []).filter(isObjectId);
+    const result = { ok: true, added: [], busy: [], offline: [], full: false };
+    for (const recipientId of new Set(wanted)) {
+      if (call.invited.has(recipientId)) continue;
+      if (call.invited.size >= MAX_CALL_PARTICIPANTS) { result.full = true; break; }
+      if (findCallForUser(recipientId)) { result.busy.push(recipientId); continue; }
+      if (!onlineUsers.has(recipientId)) { result.offline.push(recipientId); continue; }
+      call.invited.add(recipientId);
+      result.added.push(recipientId);
+      emitToUser(recipientId, "call:invite", { ...call.invitePayload, addedBy: userId });
+      const timer = setTimeout(() => {
+        if (calls.get(payload.callId) !== call || call.accepted.has(recipientId) || call.rejected.has(recipientId)) return;
+        call.invited.delete(recipientId);
+        emitToUser(recipientId, "call:end", { callId: payload.callId, userId: recipientId, reason: "no-answer" });
+        for (const memberId of call.accepted) emitToCallMember(call, memberId, "call:add-ended", { callId: payload.callId, userId: recipientId });
+      }, CALL_ADD_RING_MS);
+      call.addTimers ||= new Set();
+      call.addTimers.add(timer);
+    }
+    if (result.added.length) {
+      for (const memberId of call.accepted) {
+        emitToCallMember(call, memberId, "call:adding", { callId: payload.callId, userIds: result.added });
+      }
+    }
+    reply(result);
+  });
+
   socket.on("call:accept", (data) => {
     const invite = parsePayload(data);
     const call = calls.get(invite?.callId);
@@ -733,6 +771,7 @@ function endCall(callId, userId, reason = "ended") {
   if (!call) return;
   clearTimeout(call.timer);
   for (const timer of call.graceTimers?.values() || []) clearTimeout(timer);
+  for (const timer of call.addTimers || []) clearTimeout(timer);
   calls.delete(callId);
   for (const memberId of call.invited) {
     if (memberId === userId && reason === "ended") continue;

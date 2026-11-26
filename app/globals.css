@@ -1534,7 +1534,7 @@ form:has(> .print-container),
 
 .call-screen.has-video.is-local-video-expanded .call-stage {
   inset: max(84px, calc(env(safe-area-inset-top) + 70px)) 14px auto auto;
-  z-index: 4;
+  z-index: 10;
   width: clamp(96px, 26vw, 200px);
   aspect-ratio: 3 / 4;
   overflow: hidden;
@@ -1765,7 +1765,7 @@ form:has(> .print-container),
   touch-action: none;
   cursor: grab;
   position: absolute;
-  z-index: 3;
+  z-index: 10; /* above the top bar and controls, so it can be dragged over them */
   top: max(112px, calc(env(safe-area-inset-top) + 98px));
   right: 14px;
   width: clamp(96px, 26vw, 200px);
@@ -1777,8 +1777,24 @@ form:has(> .print-container),
   box-shadow: 0 10px 30px rgb(0 0 0 / 50%);
 }
 
-.call-screen:not(.has-video) .call-self-view {
+.call-screen:not(.has-video):not(.is-self-preview) .call-self-view {
   display: none;
+}
+
+/* caller of a video call, still ringing: own camera full screen, nothing in front of it but the bars */
+.call-screen.is-self-preview .call-hero {
+  display: none;
+}
+.call-screen.is-self-preview .call-top-bar::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -40px -12px -14px;
+  background: linear-gradient(rgb(0 0 0 / 60%), rgb(0 0 0 / 30%) 65%, transparent);
+  pointer-events: none;
+}
+.call-screen.is-self-preview .call-top-info {
+  text-shadow: 0 1px 4px rgb(0 0 0 / 85%), 0 0 10px rgb(0 0 0 / 55%);
 }
 
 .call-self-view.is-mirrored {
@@ -2733,6 +2749,96 @@ button.nickname-person:hover {
   font-size: 13px;
   font-weight: 600;
   text-shadow: none;
+}
+
+.call-top-info .call-muted-pill {
+  margin-top: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+/* add participant: a round button in the top bar, and a contact picker over the call screen */
+.call-add-picker {
+  position: absolute;
+  z-index: 30;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  background: rgb(0 0 0 / 55%);
+}
+.call-add-panel {
+  display: flex;
+  width: 100%;
+  max-height: 80%;
+  flex-direction: column;
+  gap: 10px;
+  border-radius: 18px 18px 0 0;
+  background: #111827;
+  padding: 16px;
+  color: white;
+}
+.call-add-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.call-add-head button {
+  font-size: 26px;
+  line-height: 1;
+  color: #c7d2e3;
+}
+.call-add-search {
+  width: 100%;
+  border: 1px solid #263248;
+  border-radius: 12px;
+  background: #0c1321;
+  padding: 10px 12px;
+  color: white;
+}
+.call-add-list {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+.call-add-list li button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  border-radius: 12px;
+  padding: 8px;
+  text-align: left;
+  color: white;
+}
+.call-add-list li button.is-picked {
+  background: rgb(99 102 241 / 25%);
+}
+.call-add-list li button img {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  object-fit: cover;
+}
+.call-add-list li button span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.call-add-empty {
+  padding: 16px;
+  text-align: center;
+  color: #91a0b7;
+}
+.call-add-submit {
+  border-radius: 12px;
+  background: #6366f1;
+  padding: 12px;
+  font-weight: 600;
+  color: white;
+}
+.call-add-submit:disabled {
+  opacity: .5;
 }
 
 /* a full-screen partner video shows "Muted" at the top instead; group tiles show it at the top of each tile */

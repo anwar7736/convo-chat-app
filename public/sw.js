@@ -190,14 +190,11 @@ async function runMessageAction(action, data, reply) {
   if (action === "reply") {
     const text = String(reply || "").trim();
     if (!text) return false;
-    const send = (replyTo) => fetch("/api/messages", {
+    // an ordinary message in the chat, exactly like WhatsApp's notification reply (not a quoted reply)
+    const response = await fetch("/api/messages", {
       method: "POST",
-      body: JSON.stringify({ message: text, receiver_id: ticket, is_group: isGroup, type: "text", reply_to: replyTo || undefined }),
+      body: JSON.stringify({ message: text, receiver_id: ticket, is_group: isGroup, type: "text" }),
     });
-    // sent as a reply to the message the notification is about (quoted), like replying inside the chat;
-    // if that message can no longer be quoted (deleted), it goes as an ordinary message instead of failing
-    let response = await send(data.messageId);
-    if (response.status === 400 && data.messageId) response = await send("");
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.success) {
       throw new Error(`${response.status} ${result.message || "the server refused the message"}`);
@@ -262,6 +259,28 @@ self.addEventListener("notificationclick", (event) => {
             data: { url: opened.url || "/", ticket: opened.ticket, isGroup: opened.isGroup },
           });
         }
+        return;
+      }
+      if (event.action === "reply") {
+        // like WhatsApp: the notification stays, now showing what you sent ("You: …"), ready for the next reply.
+        // (It was dismissed by the tap; the same tag brings it straight back.)
+        const lines = [...(opened.lines || []), `You: ${typedReply}`].slice(-6);
+        await self.registration.showNotification(event.notification.title || "Message", {
+          body: lines.join("\n"),
+          icon: "/icons/icon.svg",
+          badge: "/icons/icon.svg",
+          silent: true,
+          tag: event.notification.tag,
+          timestamp: Date.now(),
+          actions: event.notification.actions && event.notification.actions.length ? event.notification.actions : [
+            { action: "reply", title: "Reply", type: "text", placeholder: "Type a reply" },
+            { action: "mark-read", title: "Mark as read" },
+            { action: "mute", title: "Mute" },
+          ],
+          data: { ...opened, lines },
+        });
+        const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        windows.forEach((client) => client.postMessage({ type: "refresh-conversations" }));
         return;
       }
       // this chat's notifications go away; the app icon count drops when nothing is left

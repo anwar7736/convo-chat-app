@@ -1268,6 +1268,16 @@ form:has(> .print-container),
   margin-bottom: 4px;
 }
 
+/* the "Voice Call" label sits a little higher, away from the picture */
+.call-hero:not(.is-compact) .call-kind {
+  transform: translateY(-16px);
+}
+
+/* a "Muted" pill under the timer takes room: the label below moves down so they do not touch */
+.call-screen:has(.call-top-info .call-muted-pill) .call-hero.is-compact {
+  padding-top: max(124px, calc(env(safe-area-inset-top) + 108px));
+}
+
 .call-avatar {
   position: relative;
   width: min(48vw, 180px);

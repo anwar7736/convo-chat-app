@@ -1652,7 +1652,10 @@ export default function CallControls({ conversation: conversationProp, currentUs
     if (!callScreenOpen) return;
     window.history.pushState({ ...(window.history.state || {}), callScreen: true }, "", window.location.href);
     const onPop = () => {
-      if (window.__convoIgnoreNextPop) { window.__convoIgnoreNextPop = false; return; }
+      // several listeners share the one "ignore" flag and the page's own listener (registered first) clears it before
+      // this one runs, so a dialog above the call screen closing used to minimize the call; a history.back() still
+      // on its way is also reported by __convoBackPending until its popstate has been delivered to everyone
+      if (window.__convoIgnoreNextPop || window.__convoBackPending) { window.__convoIgnoreNextPop = false; return; }
       setAudioMenuOpen(false);
       setCallMinimized(true);
     };

@@ -1534,7 +1534,7 @@ form:has(> .print-container),
 
 .call-screen.has-video.is-local-video-expanded .call-stage {
   inset: max(84px, calc(env(safe-area-inset-top) + 70px)) 14px auto auto;
-  z-index: 10;
+  z-index: 20;
   width: clamp(96px, 26vw, 200px);
   aspect-ratio: 3 / 4;
   overflow: hidden;
@@ -1765,7 +1765,7 @@ form:has(> .print-container),
   touch-action: none;
   cursor: grab;
   position: absolute;
-  z-index: 10; /* above the top bar and controls, so it can be dragged over them */
+  z-index: 20; /* above the top bar, back button and controls, so it can be dragged over them */
   top: max(112px, calc(env(safe-area-inset-top) + 98px));
   right: 14px;
   width: clamp(96px, 26vw, 200px);

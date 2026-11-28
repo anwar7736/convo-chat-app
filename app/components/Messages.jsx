@@ -190,10 +190,19 @@ const Messages = () => {
     const onMediaLoad = () => {
       if (stickToBottomRef.current) el.scrollTop = el.scrollHeight;
     };
+    // the keyboard opening (the input is focused when a chat opens) shrinks this list: stay at the newest message
+    // instead of leaving it hidden behind the keyboard
+    const keepBottomOnResize = typeof ResizeObserver === "function"
+      ? new ResizeObserver(() => {
+        if (stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+      })
+      : null;
+    keepBottomOnResize?.observe(el);
     el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("load", onMediaLoad, true); // img load events do not bubble: capture them
     el.addEventListener("loadedmetadata", onMediaLoad, true);
     return () => {
+      keepBottomOnResize?.disconnect();
       el.removeEventListener("scroll", onScroll);
       el.removeEventListener("load", onMediaLoad, true);
       el.removeEventListener("loadedmetadata", onMediaLoad, true);

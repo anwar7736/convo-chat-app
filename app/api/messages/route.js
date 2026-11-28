@@ -45,15 +45,21 @@ export async function GET(request) {
   const messageOffset = allMessages && Number.isSafeInteger(requestedOffset) && requestedOffset >= 0
     ? requestedOffset
     : 0;
+  // Marking messages read does not hold up reading them: the update runs alongside the rest, and the messages in the
+  // answer are shown as read exactly as if it had finished first (it is awaited before the answer is sent).
+  let markReadDone = Promise.resolve();
   if (isGroup) {
-    const membership = await groupMemberSchema.exists({ group_id: referenceId, user_id: currentUserId, status: 1 });
+    const [membership, found] = await Promise.all([
+      groupMemberSchema.exists({ group_id: referenceId, user_id: currentUserId, status: 1 }),
+      markRead ? messageLogSchema.find({
+        group_id: referenceId,
+        receiver_id: currentUserId,
+        status: 0,
+      }).select("message_id sender_id").limit(200).lean() : [],
+    ]);
     if (!membership) return NextResponse.json({ success: false, message: "You are not a member of this group." }, { status: 403 });
-    unreadLogs = markRead ? await messageLogSchema.find({
-      group_id: referenceId,
-      receiver_id: currentUserId,
-      status: 0,
-    }).select("message_id sender_id").limit(200).lean() : [];
-    if (markRead) await messageLogSchema.updateMany(
+    unreadLogs = found;
+    if (markRead) markReadDone = messageLogSchema.updateMany(
       { group_id: referenceId, receiver_id: currentUserId, status: 0 },
       { $set: { status: 1 } }
     );
@@ -65,7 +71,7 @@ export async function GET(request) {
       group_id: { $exists: false },
       status: 0,
     }).select("message_id sender_id").sort({ createdAt: -1 }).limit(200).lean() : [];
-    if (markRead) await messageLogSchema.updateMany(
+    if (markRead) markReadDone = messageLogSchema.updateMany(
       { sender_id: referenceId, receiver_id: currentUserId, group_id: { $exists: false }, status: 0 },
       { $set: { status: 1 } }
     );
@@ -85,48 +91,42 @@ export async function GET(request) {
     { $sort: { createdAt: -1, _id: -1 } },
     ...(messageOffset ? [{ $skip: messageOffset }] : []),
     { $limit: messageLimit },
-    { $lookup: { from: "groups", localField: "group_id", foreignField: "_id", as: "group" } },
-    { $unwind: { path: "$group", preserveNullAndEmptyArrays: true } },
     { $lookup: { from: "messages", localField: "message_id", foreignField: "_id", as: "message" } },
     { $unwind: "$message" },
-    { $lookup: { from: "users", localField: "sender_id", foreignField: "_id", as: "sender" } },
-    { $unwind: "$sender" },
-    { $lookup: { from: "users", localField: "receiver_id", foreignField: "_id", as: "receiver" } },
-    { $unwind: "$receiver" },
-    { $lookup: { from: "message_logs", localField: "message_id", foreignField: "message_id", as: "message_receipts" } },
+    // who has seen the message: only the receipts that count (seen, by someone other than you and the sender) come
+    // back from the database, instead of every receipt of every message
     {
-      $addFields: {
-        seen_by_ids: {
-          $map: {
-            input: {
-              $filter: {
-                input: "$message_receipts",
-                as: "receipt",
-                cond: {
-                  $and: [
-                    { $eq: ["$$receipt.status", 1] },
-                    { $ne: ["$$receipt.receiver_id", currentUserId] },
-                    { $ne: ["$$receipt.receiver_id", "$sender_id"] },
-                  ],
-                },
+      $lookup: {
+        from: "message_logs",
+        let: { mid: "$message_id", sid: "$sender_id" },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ["$message_id", "$$mid"] },
+                  { $eq: ["$status", 1] },
+                  { $ne: ["$receiver_id", currentUserId] },
+                  { $ne: ["$receiver_id", "$$sid"] },
+                ],
               },
             },
-            as: "receipt",
-            in: "$$receipt.receiver_id",
           },
-        },
+          { $project: { _id: 0, receiver_id: 1 } },
+        ],
+        as: "message_receipts",
       },
     },
+    { $addFields: { seen_by_ids: "$message_receipts.receiver_id" } },
     {
       $project: {
         _id: 1,
         message_id: 1,
         status: 1,
         seen_by_ids: 1,
-        "group._id": 1,
-        "group.name": 1,
-        "group.photo": 1,
-        "group.short_desc": 1,
+        group_id: 1,
+        sender_id: 1,
+        receiver_id: 1,
         "message._id": 1,
         "message.sender_id": 1,
         "message.message": 1,
@@ -141,12 +141,6 @@ export async function GET(request) {
         "message.editedAt": 1,
         "message.deletedForEveryone": 1,
         "message.hiddenFor": 1,
-        "sender._id": 1,
-        "sender.name": 1,
-        "sender.photo": 1,
-        "receiver._id": 1,
-        "receiver.name": 1,
-        "receiver.photo": 1,
       },
     },
     { $sort: { "message.createdAt": 1, "message._id": 1 } },
@@ -165,21 +159,42 @@ export async function GET(request) {
       .lean(),
   ]);
 
+  await markReadDone;
+  if (markRead) {
+    // the read-marking ran alongside the query: show your own unread messages as read, as if it had finished first
+    for (const item of data) {
+      if (item.status === 0 && String(item.receiver_id) === sessionUserId) item.status = 1;
+    }
+  }
+
   const visibleData = data.filter((item) =>
     item.status !== 2 &&
     !(item.message?.hiddenFor || []).some((id) => String(id) === sessionUserId)
   );
+  // names and photos of everyone shown (senders, receivers, who saw it, who reacted) in one query, plus the group
   const memberIds = new Set();
   for (const item of visibleData) {
+    memberIds.add(String(item.sender_id));
+    memberIds.add(String(item.receiver_id));
     for (const id of item.seen_by_ids || []) memberIds.add(String(id));
     for (const reaction of item.message?.reactions || []) memberIds.add(String(reaction.user_id));
   }
-  const memberProfiles = memberIds.size
-    ? await userSchema.find({ _id: { $in: [...memberIds].map((id) => new mongoose.Types.ObjectId(id)) } })
-      .select("name photo").lean()
-    : [];
+  const [memberProfiles, groupDoc] = await Promise.all([
+    memberIds.size
+      ? userSchema.find({ _id: { $in: [...memberIds].map((id) => new mongoose.Types.ObjectId(id)) } })
+        .select("name photo").lean()
+      : [],
+    isGroup && visibleData.length
+      ? groupSchema.findById(referenceId).select("name photo short_desc").lean()
+      : null,
+  ]);
   const profilesById = new Map(memberProfiles.map((profile) => [String(profile._id), profile]));
-  const enrichedData = visibleData.map((item) => {
+  const personOf = (id) => {
+    const profile = profilesById.get(String(id));
+    return profile ? { _id: profile._id, name: profile.name, photo: profile.photo } : null;
+  };
+  // an entry whose sender or receiver no longer exists is left out (as the joined lookup did before)
+  const enrichedData = visibleData.filter((item) => personOf(item.sender_id) && personOf(item.receiver_id)).map((item) => {
     const seenBy = (item.seen_by_ids || [])
       .map((id) => profilesById.get(String(id)))
       .filter(Boolean)
@@ -194,9 +209,17 @@ export async function GET(request) {
     });
     return {
       ...item,
+      sender: personOf(item.sender_id),
+      receiver: personOf(item.receiver_id),
+      ...(item.group_id && groupDoc
+        ? { group: { _id: groupDoc._id, name: groupDoc.name, photo: groupDoc.photo, short_desc: groupDoc.short_desc } }
+        : {}),
       seen_by: seenBy,
       message: { ...item.message, reactions, hiddenFor: undefined },
       seen_by_ids: undefined,
+      sender_id: undefined,
+      receiver_id: undefined,
+      group_id: undefined,
     };
   });
 

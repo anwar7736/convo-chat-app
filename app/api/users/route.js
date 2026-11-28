@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { groupMemberSchema } from "@/app/models/groupMemberModel";
 import { messageLogSchema } from "@/app/models/messageLogModel";
+import { messageSchema } from "@/app/models/messageModel";
 import { callLogSchema } from "@/app/models/callLogModel";
 import { getSessionUserId } from "@/app/lib/session";
 import { getUnreadNotificationCounts } from "@/app/lib/unreadNotificationCounts";
@@ -31,18 +32,44 @@ export async function GET(request) {
             .filter(([id, nick]) => mongoose.isValidObjectId(id) && String(nick || '').toLowerCase().includes(search.toLowerCase()))
             .map(([id]) => new mongoose.Types.ObjectId(id))
         : [];
-    let data = await userSchema.aggregate([
-        // User Query
+    // People you have chatted with (with no search the list shows only them), and the groups you belong to: these
+    // are worked out first so the heavy lookups below only touch your own conversations, not every user and group
+    const directConversations = await messageLogSchema.aggregate([
         {
             $match: {
+                group_id: null,
                 $or: [
-                    { name: { $regex: new RegExp(escapedSearch, 'i') } },
-                    { email: { $regex: new RegExp(escapedSearch, 'i') } },
-                    { phone: { $regex: new RegExp(escapedSearch, 'i') } },
-                    ...(nicknameMatchIds.length ? [{ _id: { $in: nicknameMatchIds } }] : []),
+                    { sender_id: authObjectId },
+                    { receiver_id: authObjectId },
                 ],
-            }
+            },
         },
+        {
+            $group: {
+                _id: {
+                    $cond: [
+                        { $eq: ["$sender_id", authObjectId] },
+                        "$receiver_id",
+                        "$sender_id",
+                    ],
+                },
+                last_activity: { $max: "$createdAt" },
+            },
+        },
+    ]);
+    const myGroupIds = await groupMemberSchema.find({ user_id: authObjectId, status: 1 }).distinct("group_id");
+    const userMatch = {
+        $or: [
+            { name: { $regex: new RegExp(escapedSearch, 'i') } },
+            { email: { $regex: new RegExp(escapedSearch, 'i') } },
+            { phone: { $regex: new RegExp(escapedSearch, 'i') } },
+            ...(nicknameMatchIds.length ? [{ _id: { $in: nicknameMatchIds } }] : []),
+        ],
+    };
+    // with a search every user can match (and the old per-user activity is used to order strangers); without one only
+    // people with a chat are listed, and their unread count is all that is needed from the messages
+    const userStages = search ? [
+        { $match: userMatch },
         {
             $lookup: {
                 from: "message_logs",
@@ -77,9 +104,45 @@ export async function GET(request) {
                     }
                 },
                 is_group: 0,
-                total_members: 0 
+                total_members: 0
             }
         },
+    ] : [
+        { $match: { $and: [userMatch, { _id: { $in: directConversations.map((item) => item._id) } }] } },
+        {
+            $lookup: {
+                from: "message_logs",
+                let: { uid: "$_id" },
+                pipeline: [
+                    {
+                        $match: {
+                            $expr: {
+                                $and: [
+                                    { $eq: ["$sender_id", "$$uid"] },
+                                    { $eq: ["$receiver_id", authObjectId] },
+                                    { $eq: ["$status", 0] },
+                                    { $eq: [{ $ifNull: ["$group_id", null] }, null] },
+                                ],
+                            },
+                        },
+                    },
+                    { $count: "n" },
+                ],
+                as: "pending_count",
+            },
+        },
+        {
+            $addFields: {
+                last_activity: null,
+                pending: { $ifNull: [{ $arrayElemAt: ["$pending_count.n", 0] }, 0] },
+                is_group: 0,
+                total_members: 0,
+            },
+        },
+    ];
+    let data = await userSchema.aggregate([
+        // User Query
+        ...userStages,
         {
             $project: {
                 _id: 1,
@@ -97,6 +160,7 @@ export async function GET(request) {
             $unionWith: {
                 coll: "groups", // Replace with your actual group collection name
                 pipeline: [
+                    { $match: { _id: { $in: myGroupIds } } },
                     {
                         $lookup: {
                             from: "group_members",
@@ -142,32 +206,36 @@ export async function GET(request) {
                     },
             
                     {
+                        // the group's newest activity and your unread count, worked out inside the database instead of
+                        // loading every member's copy of every message into memory
                         $lookup: {
                             from: "message_logs",
-                            localField: "_id",
-                            foreignField: "group_id",
-                            as: "message_logs"
+                            let: { gid: "$_id" },
+                            pipeline: [
+                                { $match: { $expr: { $eq: ["$group_id", "$$gid"] } } },
+                                {
+                                    $group: {
+                                        _id: null,
+                                        last_activity: { $max: "$createdAt" },
+                                        pending: {
+                                            $sum: {
+                                                $cond: [
+                                                    { $and: [{ $eq: ["$status", 0] }, { $eq: ["$receiver_id", authObjectId] }] },
+                                                    1,
+                                                    0,
+                                                ],
+                                            },
+                                        },
+                                    },
+                                },
+                            ],
+                            as: "log_summary"
                         }
                     },
                     {
                         $addFields: {
-                            last_activity: {
-                                $max: "$message_logs.createdAt" // Find the most recent activity
-                            },
-                            pending: {
-                                $size: {
-                                    $filter: {
-                                        input: "$message_logs",
-                                        as: "log",
-                                        cond: {
-                                            $and: [
-                                                { $eq: ["$$log.status", 0] },
-                                                { $eq: ["$$log.receiver_id", authObjectId] }
-                                            ]
-                                        }
-                                    }
-                                }
-                            },
+                            last_activity: { $ifNull: [{ $arrayElemAt: ["$log_summary.last_activity", 0] }, null] },
+                            pending: { $ifNull: [{ $arrayElemAt: ["$log_summary.pending", 0] }, 0] },
                             is_group: 1 // Flag for group
                         }
                     },
@@ -197,81 +265,70 @@ export async function GET(request) {
         }
     ]);
     
-    const groupIds = data
-        .filter((item) => Number(item.is_group) === 1)
-        .map((item) => new mongoose.Types.ObjectId(item._id));
-    const directConversations = await messageLogSchema.aggregate([
-        {
-            $match: {
-                group_id: null,
-                $or: [
-                    { sender_id: authObjectId },
-                    { receiver_id: authObjectId },
-                ],
-            },
-        },
-        {
-            $group: {
-                _id: {
-                    $cond: [
-                        { $eq: ["$sender_id", authObjectId] },
-                        "$receiver_id",
-                        "$sender_id",
-                    ],
-                },
-                last_activity: { $max: "$createdAt" },
-            },
-        },
-    ]);
     const directActivity = new Map(
         directConversations.map((item) => [String(item._id), item.last_activity])
     );
     const conversationKey = (id, isGroup) =>
         `${Number(isGroup) === 1 ? 1 : 0}:${String(id)}`;
-    const recentLogs = groupIds.length || data.length
-        ? await messageLogSchema.aggregate([
-            {
-                $match: {
-                    status: { $ne: 2 },
-                    $or: [
-                        { sender_id: authObjectId, group_id: null },
-                        { receiver_id: authObjectId, group_id: null },
-                        ...(groupIds.length ? [{ group_id: { $in: groupIds }, receiver_id: authObjectId }] : []),
-                    ],
-                },
-            },
-            { $lookup: { from: "messages", localField: "message_id", foreignField: "_id", as: "message" } },
-            { $unwind: "$message" },
-            {
-                $match: {
-                    "message.deletedForEveryone": { $ne: true },
-                    "message.hiddenFor": { $nin: [authObjectId] },
-                },
-            },
-            { $sort: { "message.createdAt": -1, "message._id": -1 } },
-            {
-                $group: {
-                    _id: {
-                        $cond: [
-                            { $ifNull: ["$group_id", false] },
-                            "$group_id",
-                            { $cond: [{ $eq: ["$sender_id", authObjectId] }, "$receiver_id", "$sender_id"] },
-                        ],
-                    },
-                    message_id: { $first: "$message_id" },
-                    sender_id: { $first: "$sender_id" },
-                    status: { $first: "$status" },
-                    createdAt: { $first: "$message.createdAt" },
-                    group_id: { $first: "$group_id" },
-                    text: { $first: "$message.message" },
-                    type: { $first: "$message.type" },
-                    attachmentName: { $first: "$message.attachmentName" },
-                    durationSeconds: { $first: "$message.durationSeconds" },
-                },
-            },
-        ])
-        : [];
-    const recentCalls = data.length
+    const visibleConversations = data
+        .filter((item) =>
+            Number(item.is_group) === 1 ||
+            directActivity.has(String(item._id)) ||
+            Boolean(search)
+        );
+    // The newest message you can see in each conversation. Only the latest few messages of each chat are read (by
+    // index) and checked, instead of looking up every message you have ever had.
+    const latestVisibleMessage = async (item) => {
+        const isGroup = Number(item.is_group) === 1;
+        const logFilter = isGroup
+            ? { receiver_id: authObjectId, group_id: item._id }
+            : {
+                group_id: null,
+                $or: [
+                    { sender_id: authObjectId, receiver_id: item._id },
+                    { sender_id: item._id, receiver_id: authObjectId },
+                ],
+            };
+        const logs = (await messageLogSchema.find(logFilter)
+            .sort({ createdAt: -1 })
+            .limit(60)
+            .select("message_id sender_id group_id status createdAt")
+            .lean()).filter((log) => log.status !== 2);
+        if (!logs.length) return null;
+        const messageDocs = await messageSchema.find({ _id: { $in: logs.map((log) => log.message_id) } })
+            .select("message type attachmentName durationSeconds createdAt deletedForEveryone hiddenFor")
+            .lean();
+        const byId = new Map(messageDocs.map((doc) => [String(doc._id), doc]));
+        const candidates = logs
+            .map((log) => ({ log, message: byId.get(String(log.message_id)) }))
+            .filter(({ message }) => message &&
+                message.deletedForEveryone !== true &&
+                !(message.hiddenFor || []).some((id) => String(id) === String(authObjectId)))
+            .sort((a, b) => (new Date(b.message.createdAt) - new Date(a.message.createdAt)) ||
+                String(b.message._id).localeCompare(String(a.message._id)));
+        const best = candidates[0];
+        if (!best) return null;
+        return {
+            _id: item._id,
+            message_id: best.log.message_id,
+            sender_id: best.log.sender_id,
+            status: best.log.status,
+            createdAt: best.message.createdAt,
+            group_id: best.log.group_id,
+            text: best.message.message,
+            type: best.message.type,
+            attachmentName: best.message.attachmentName,
+            durationSeconds: best.message.durationSeconds,
+        };
+    };
+    const withMessages = visibleConversations.filter((item) =>
+        Number(item.is_group) === 1 || directActivity.has(String(item._id)));
+    const recentLogs = [];
+    for (let start = 0; start < withMessages.length; start += 20) {
+        const batch = await Promise.all(withMessages.slice(start, start + 20).map(latestVisibleMessage));
+        recentLogs.push(...batch.filter(Boolean));
+    }
+    const recentCalls = visibleConversations.length
         ? await callLogSchema.aggregate([
             {
                 $match: {
@@ -280,8 +337,8 @@ export async function GET(request) {
                     deletedForEveryone: { $ne: true },
                     // group calls by group id; direct calls by the other person, whoever started the call
                     $or: [
-                        { isGroup: true, conversationId: { $in: data.filter((item) => Number(item.is_group) === 1).map((item) => item._id) } },
-                        { isGroup: false, participants: { $in: data.filter((item) => Number(item.is_group) === 0).map((item) => item._id) } },
+                        { isGroup: true, conversationId: { $in: visibleConversations.filter((item) => Number(item.is_group) === 1).map((item) => item._id) } },
+                        { isGroup: false, participants: { $in: visibleConversations.filter((item) => Number(item.is_group) === 0).map((item) => item._id) } },
                     ],
                 },
             },
@@ -331,21 +388,15 @@ export async function GET(request) {
         conversationKey(item._id, Boolean(item.group_id)),
         item,
     ]));
-    const blockedByUsers = data.length
+    const blockedByUsers = visibleConversations.length
         ? await userSchema.find({
-            _id: { $in: data.filter((item) => Number(item.is_group) === 0).map((item) => item._id) },
+            _id: { $in: visibleConversations.filter((item) => Number(item.is_group) === 0).map((item) => item._id) },
             blockedUsers: authObjectId,
         }).select("_id").lean()
         : [];
     const blockedByIds = new Set(blockedByUsers.map((item) => String(item._id)));
     const archivedIds = new Set((currentUser?.archivedConversations || []).map(String));
     const blockedIds = new Set((currentUser?.blockedUsers || []).map(String));
-    const visibleConversations = data
-        .filter((item) =>
-            Number(item.is_group) === 1 ||
-            directActivity.has(String(item._id)) ||
-            Boolean(search)
-        );
     const directIds = visibleConversations
         .filter((item) => Number(item.is_group) === 0)
         .map((item) => item._id);

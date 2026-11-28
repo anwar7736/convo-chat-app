@@ -141,6 +141,15 @@ function useTone(kind, playing, loop = true) {
   }, [kind, playing, loop]);
 }
 
+// which outputs are plugged in, read from every device label (Android lists headsets under inputs too); the built-in
+// "Headset earpiece" is the phone's own earpiece, not a headset
+function detectAudioRoutes(devices) {
+  const labels = (devices || []).map((d) => d.label || "");
+  const hasBt = labels.some((l) => /bluetooth|airpods|buds/i.test(l));
+  const hasWired = !hasBt && labels.some((l) => !/earpiece/i.test(l) && /wired|headphone|earphone|usb|headset/i.test(l));
+  return { hasBt, hasWired };
+}
+
 export default function CallControls({ conversation: conversationProp, currentUser, showButtons = true, blocked = false }) {
   const conversation = conversationProp;
   const { users } = useContext(UserListContext) || {};
@@ -359,9 +368,7 @@ export default function CallControls({ conversation: conversationProp, currentUs
   const prevRouteKeyRef = useRef("speaker");
   useEffect(() => {
     if (!call) { prevRouteKeyRef.current = "speaker"; return; }
-    const labels = audioDevices.map((d) => d.label || "");
-    const hasBt = labels.some((l) => /bluetooth|airpods|buds/i.test(l));
-    const hasWired = !hasBt && labels.some((l) => !/earpiece/i.test(l) && /wired|headphone|earphone|usb|headset/i.test(l));
+    const { hasBt, hasWired } = detectAudioRoutes(audioDevices);
     const key = hasBt ? "bluetooth" : hasWired ? "headset" : "speaker";
     if (key === prevRouteKeyRef.current) return;
     prevRouteKeyRef.current = key;
@@ -465,6 +472,7 @@ export default function CallControls({ conversation: conversationProp, currentUs
       speaker: /speaker|loudspeaker/i,
       earpiece: /earpiece|receiver|phone/i,
       bluetooth: /bluetooth|headset|headphone/i,
+      headset: /wired|headphone|earphone|usb|headset/i,
     };
     let device = outputs.find((item) => matches[route].test(item.label || ""));
     if (route === "speaker") {
@@ -482,9 +490,9 @@ export default function CallControls({ conversation: conversationProp, currentUs
     if (device) {
       const applied = await changeAudioOutput(device.deviceId);
       if (!applied) return;
-    } else if (route !== "speaker" || outputs.length) {
-      return; // this browser cannot route to it: nothing happens, no message
     }
+    // no device to name: this browser cannot choose the output itself (the phone decides, Bluetooth when connected),
+    // but the choice is still shown, so the button and the list always agree with what was picked
 
     // the microphone follows the chosen route: a Bluetooth headset mic for Bluetooth, the phone's own mic otherwise
     const inputs = audioDevices.filter((item) => item.kind === "audioinput");
@@ -1614,10 +1622,18 @@ export default function CallControls({ conversation: conversationProp, currentUs
   useEffect(() => {
     if (!call?.connectedAt) return;
     let regaining = false;
+    let lastAttempt = 0;
     const regainMicrophone = async () => {
       if (regaining) return;
       const track = localStreamRef.current?.getAudioTracks?.()[0];
       if (!track || (track.readyState !== "ended" && !track.muted)) return;
+      // In the background the phone pauses the microphone on purpose (the track is only "muted", not ended). Taking
+      // the mic again then just returns a new track that is paused the same way, and doing that over and over
+      // makes a voice call stutter and lag (a video call keeps the mic, so it never loops). So a merely muted track
+      // is left alone until the app is visible again; an ended one is replaced at once. Never more than once per 4 s.
+      if (track.readyState !== "ended" && document.visibilityState !== "visible") return;
+      if (Date.now() - lastAttempt < 4000) return;
+      lastAttempt = Date.now();
       regaining = true;
       try {
         await changeAudioInput(audioInputId);
@@ -2017,17 +2033,19 @@ export default function CallControls({ conversation: conversationProp, currentUs
                       <span>Audio</span>
                       {audioMenuOpen && (
                         <div className="call-audio-menu" role="menu" aria-label="Audio output">
-                          {[
-                            { id: "speaker", label: "Speaker", icon: FiVolume2 },
-                            { id: "earpiece", label: "Earpiece", icon: FiSmartphone },
-                            { id: "bluetooth", label: "Bluetooth", icon: FiBluetooth },
-                          ].filter(({ id }) => {
-                            if (id === "speaker" || audioRoute === id) return true;
-                            const outputs = audioDevices.filter((device) => device.kind === "audiooutput");
-                            const pattern = id === "earpiece" ? /earpiece|receiver|phone/i : /bluetooth|headset|headphone/i;
-                            return outputs.some((device) => pattern.test(device.label || "")) ||
-                              (id === "bluetooth" && typeof navigator.mediaDevices?.selectAudioOutput === "function");
-                          }).map(({ id, label, icon: Icon }) => (
+                          {(() => {
+                            // Speaker and Earpiece are always there; Bluetooth / Headset appear while connected (or chosen),
+                            // so an option never vanishes from the list after you pick another one
+                            const { hasBt, hasWired } = detectAudioRoutes(audioDevices);
+                            return [
+                              { id: "speaker", label: "Speaker", icon: FiVolume2 },
+                              { id: "earpiece", label: "Earpiece", icon: FiSmartphone },
+                              ...(hasBt || audioRoute === "bluetooth" || typeof navigator.mediaDevices?.selectAudioOutput === "function"
+                                ? [{ id: "bluetooth", label: "Bluetooth", icon: FiBluetooth }] : []),
+                              ...(hasWired || audioRoute === "headset"
+                                ? [{ id: "headset", label: "Headphones", icon: FiHeadphones }] : []),
+                            ];
+                          })().map(({ id, label, icon: Icon }) => (
                             <button
                               key={id}
                               type="button"

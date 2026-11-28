@@ -108,6 +108,15 @@ const Messages = () => {
   loadOlderRef.current = loadOlder;
   const conversationUserIdRef = useRef(conversationUser?._id);
   conversationUserIdRef.current = conversationUser?._id;
+  // opening another chat starts at its newest message (the list may already hold that chat's saved messages, so the
+  // old "list was empty" signal can no longer be relied on)
+  useLayoutEffect(() => {
+    lastCountRef.current = 0;
+    stickToBottomRef.current = true;
+    olderJustLoadedRef.current = false;
+    olderAnchorRef.current = null;
+    setUnseen(0);
+  }, [conversationUser?._id, conversationUser?.is_group]);
   // after older messages are added above, keep the same message in view
   useLayoutEffect(() => {
     const el = elementRef.current;
@@ -1319,6 +1328,7 @@ function MessageContent({ message, onPreview }) {
         >
           <img
             src={message.attachmentUrl}
+            decoding="async"
             alt={message.attachmentName || "Shared image"}
             className="max-h-80 max-w-full rounded-xl object-contain"
             draggable={false}

@@ -5,7 +5,7 @@ import { AuthContext } from "../contexts/AuthContext";
 import { UserContext } from "../contexts/UserContext";
 import { MessageContext } from "../contexts/MessageContext";
 import { UserListContext } from "../contexts/UserListContext";
-import { getImageURL, loadConversationTimeline, readListCache, writeListCache } from "../helpers/helper";
+import { getImageURL, loadConversationTimeline, readConversationCache, readListCache, writeListCache } from "../helpers/helper";
 import { toast } from "sonner";
 
 // Format startedAt into "Today, 5:14 AM" / "Yesterday, 10:39 PM" / "Mon, 5:14 AM"
@@ -113,8 +113,9 @@ export default function CallsTab({ setConversationLoading, onOpenConversation })
       if (!ticket) throw new Error("Conversation not found.");
       if (reqId !== requestIdRef.current) return ticket; // superseded
       onOpenConversation?.();
-      setMessages([]);
-      setCallLogs([]);
+      const cached = readConversationCache(ticket);
+      setMessages(cached?.messages || []);
+      setCallLogs(cached?.callLogs || []);
       setUser(ticket);
       setUsers((current) => current.map((item) =>
         item?._id === ticket._id ? { ...item, pending: 0 } : item

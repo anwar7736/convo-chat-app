@@ -17,7 +17,7 @@ import { MdDone, MdDoneAll } from "react-icons/md";
 import { toast } from "sonner";
 import { UserContext } from "../contexts/UserContext";
 import { MessageContext } from "../contexts/MessageContext";
-import { activityFormat, getImageURL, loadConversationTimeline, socket_connection } from "../helpers/helper";
+import { activityFormat, getImageURL, loadConversationTimeline, readConversationCache, socket_connection } from "../helpers/helper";
 import { draftKey, getAllDrafts } from "../helpers/drafts";
 import { UserListContext } from "../contexts/UserListContext";
 
@@ -116,9 +116,11 @@ const Users = ({ activeUsers, activityNow, isLoading, setConversationLoading, sh
   const getMessages = async (data) => {
     if (data?._id === user?._id && data?.is_group === user?.is_group) return;
     const requestId = ++requestIdRef.current;
-    setConversationLoading(true);
-    setMessages([]);
-    setCallLogs([]);
+    // a chat opened lately shows its saved newest messages at once while the fresh copy loads
+    const cached = readConversationCache(data);
+    setConversationLoading(!cached?.messages?.length);
+    setMessages(cached?.messages || []);
+    setCallLogs(cached?.callLogs || []);
     setUser(data);
     setUsers((current) => current.map((item) =>
       item?._id === data?._id ? { ...item, pending: 0 } : item

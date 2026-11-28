@@ -216,6 +216,36 @@ const OLDER_MESSAGE_STEP = 100;
 const messageWindows = new Map(); // "isGroup:id" -> { limit, hasMore }
 const windowKey = (data) => `${Number(data?.is_group) === 1 ? 1 : 0}:${data?._id}`;
 
+// The newest messages of the chats you opened lately are kept on this phone, so opening one shows them at once while
+// the fresh copy loads (the same idea as the chat list). Only the last few chats are kept; sign-out clears them all.
+const CHAT_CACHE_KEEP = 15;
+const chatCacheKey = (data) => `convo-cache-chat-${auth()?._id}-${windowKey(data)}`;
+export const readConversationCache = (data) => {
+  try {
+    if (!auth()?._id) return null;
+    const parsed = JSON.parse(window.localStorage.getItem(chatCacheKey(data)) || "null");
+    return parsed && Array.isArray(parsed.messages) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+const writeConversationCache = (data, messages, callLogs) => {
+  try {
+    if (!auth()?._id) return;
+    const key = chatCacheKey(data);
+    window.localStorage.setItem(key, JSON.stringify({
+      messages: messages.slice(-FIRST_MESSAGE_WINDOW),
+      callLogs: callLogs.slice(0, 30),
+    }));
+    const indexKey = `convo-cache-chatkeys-${auth()._id}`;
+    const keys = [key, ...(JSON.parse(window.localStorage.getItem(indexKey) || "[]").filter((item) => item !== key))];
+    keys.slice(CHAT_CACHE_KEEP).forEach((old) => window.localStorage.removeItem(old));
+    window.localStorage.setItem(indexKey, JSON.stringify(keys.slice(0, CHAT_CACHE_KEEP)));
+  } catch {
+    // storage full or unavailable: chats just open normally
+  }
+};
+
 export const conversationHistoryState = (data) => ({
   hasMore: Boolean(messageWindows.get(windowKey(data))?.hasMore),
 });
@@ -244,6 +274,7 @@ export const loadConversationTimeline = async (data) => {
     activeSocket.emit("messages-seen", event);
   }
   messageWindows.set(key, { limit, hasMore: Boolean(res.has_more) });
+  if (Array.isArray(res.data)) writeConversationCache(data, res.data, Array.isArray(res.call_logs) ? res.call_logs : []);
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("chat:history-state", { detail: { key, hasMore: Boolean(res.has_more) } }));
   }

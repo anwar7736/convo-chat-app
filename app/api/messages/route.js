@@ -36,7 +36,12 @@ export async function GET(request) {
   const markRead = query.get("mark_read") !== "0";
   const allMessages = query.get("all") === "1";
   const requestedOffset = Number(query.get("offset") || 0);
-  const messageLimit = allMessages ? 500 : 200;
+  // `limit` (1-500): how many of the newest messages to return; the app opens a chat with a small window and asks for
+  // more as the person scrolls up, so opening a chat is fast. Without it the old 200 applies.
+  const requestedLimit = Number(query.get("limit"));
+  const messageLimit = allMessages
+    ? 500
+    : Number.isInteger(requestedLimit) && requestedLimit >= 1 && requestedLimit <= 500 ? requestedLimit : 200;
   const messageOffset = allMessages && Number.isSafeInteger(requestedOffset) && requestedOffset >= 0
     ? requestedOffset
     : 0;
@@ -195,6 +200,29 @@ export async function GET(request) {
     };
   });
 
+  // a reply whose original message is older than this window still shows what it answers
+  const loadedMessageIds = new Set(enrichedData.map((item) => String(item.message_id)));
+  const missingParentIds = [...new Set(enrichedData
+    .map((item) => item.message?.reply_to)
+    .filter((id) => id && !loadedMessageIds.has(String(id)))
+    .map(String))];
+  if (missingParentIds.length) {
+    const parents = await messageSchema.find({ _id: { $in: missingParentIds.map((id) => new mongoose.Types.ObjectId(id)) } })
+      .select("sender_id message attachmentName deletedForEveryone").lean();
+    const parentSenders = await userSchema.find({ _id: { $in: parents.map((parent) => parent.sender_id).filter(Boolean) } })
+      .select("name").lean();
+    const senderNames = new Map(parentSenders.map((person) => [String(person._id), person.name]));
+    const previews = new Map(parents.map((parent) => [String(parent._id), {
+      sender_id: String(parent.sender_id),
+      sender_name: senderNames.get(String(parent.sender_id)) || "",
+      text: parent.deletedForEveryone ? "" : parent.message || parent.attachmentName || "",
+    }]));
+    for (const item of enrichedData) {
+      const preview = previews.get(String(item.message?.reply_to));
+      if (preview) item.message = { ...item.message, reply_preview: preview };
+    }
+  }
+
   const unreadBySender = new Map();
   for (const log of unreadLogs || []) {
     const senderId = String(log.sender_id);
@@ -230,7 +258,7 @@ export async function GET(request) {
     data: enrichedData,
     call_logs: callLogs.map((log) => viewCallLog(log, sessionUserId)),
     seen_events: seenEvents,
-    ...(allMessages ? { has_more: data.length === messageLimit } : {}),
+    has_more: data.length === messageLimit,
   });
 }
 

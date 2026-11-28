@@ -19,7 +19,9 @@ import {
   getImageURL,
   loadConversationTimeline,
   playMessageReminder,
+  readListCache,
   socket_connection,
+  writeListCache,
 } from "./helpers/helper";
 import { draftKey, getDraft, setDraft } from "./helpers/drafts";
 import useBackToClose, { afterHistorySettles, dropHistoryEntry } from "./helpers/useBackToClose";
@@ -418,7 +420,14 @@ const Home = () => {
       return;
     }
     const requestId = ++userListRequestRef.current;
-    if (showLoading) setIsUserListLoading(true);
+    // the last list is shown at once (like WhatsApp) while the fresh one loads
+    const cachedList = showLoading && !search ? readListCache("chats", authUser._id) : null;
+    if (cachedList?.length) {
+      setUsers(cachedList);
+      setIsUserListLoading(false);
+    } else if (showLoading) {
+      setIsUserListLoading(true);
+    }
     try {
       const response = await fetch(
         `/api/users?auth_id=${authUser._id}&search=${encodeURIComponent(search)}`
@@ -429,6 +438,7 @@ const Home = () => {
       }
       if (requestId === userListRequestRef.current) {
         setUsers(result.data);
+        if (!search) writeListCache("chats", authUser._id, result.data);
         setUnreadBadgeCount(Math.max(0, Number(result.unread_count) || 0));
       }
     } catch (error) {

@@ -47,6 +47,32 @@ export const setAuthProfile = (user) => {
 export const clearAuthProfile = () => {
   if (typeof window !== "undefined") {
     window.localStorage.removeItem("auth-profile");
+    // the saved copies of the chat and call lists belong to the signed-out person
+    try {
+      Object.keys(window.localStorage)
+        .filter((key) => key.startsWith("convo-cache-"))
+        .forEach((key) => window.localStorage.removeItem(key));
+    } catch {
+      // storage unavailable: nothing to clear
+    }
+  }
+};
+
+// last good copy of a list (chats, calls), shown at once while the fresh one loads
+export const readListCache = (name, userId) => {
+  try {
+    const raw = window.localStorage.getItem(`convo-cache-${name}-${userId}`);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+export const writeListCache = (name, userId, list) => {
+  try {
+    window.localStorage.setItem(`convo-cache-${name}-${userId}`, JSON.stringify(list));
+  } catch {
+    // storage full or unavailable: the app just loads normally next time
   }
 };
 
@@ -182,11 +208,32 @@ export const getImageURL = (imageName, type = null) => {
   }
 };
 
+// A chat opens with its newest few messages (fast, like WhatsApp); scrolling up asks for more. The number loaded per
+// chat is remembered, so every later refresh of that chat (new message, seen, delete) returns the same window and
+// never throws away older messages already shown.
+const FIRST_MESSAGE_WINDOW = 60;
+const OLDER_MESSAGE_STEP = 100;
+const messageWindows = new Map(); // "isGroup:id" -> { limit, hasMore }
+const windowKey = (data) => `${Number(data?.is_group) === 1 ? 1 : 0}:${data?._id}`;
+
+export const conversationHistoryState = (data) => ({
+  hasMore: Boolean(messageWindows.get(windowKey(data))?.hasMore),
+});
+
+// the next, bigger window for this chat (call, then reload the timeline)
+export const growConversationWindow = (data) => {
+  const key = windowKey(data);
+  const current = messageWindows.get(key) || { limit: FIRST_MESSAGE_WINDOW, hasMore: false };
+  messageWindows.set(key, { ...current, limit: Math.min(500, current.limit + OLDER_MESSAGE_STEP) });
+};
+
 export const loadConversationTimeline = async (data) => {
+  const key = windowKey(data);
+  const limit = messageWindows.get(key)?.limit || FIRST_MESSAGE_WINDOW;
   const response = await fetch(
     `api/messages?auth_id=${auth()?._id}&ref_id=${data?._id}&is_group=${
       data?.is_group
-    }`
+    }&limit=${limit}`
   );
   const res = await response.json();
   if (!response.ok || !res.success) {
@@ -195,6 +242,10 @@ export const loadConversationTimeline = async (data) => {
   const activeSocket = socket_connection();
   for (const event of res.seen_events || []) {
     activeSocket.emit("messages-seen", event);
+  }
+  messageWindows.set(key, { limit, hasMore: Boolean(res.has_more) });
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("chat:history-state", { detail: { key, hasMore: Boolean(res.has_more) } }));
   }
   return {
     messages: res.data,

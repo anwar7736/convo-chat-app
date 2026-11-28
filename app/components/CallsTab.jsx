@@ -5,7 +5,7 @@ import { AuthContext } from "../contexts/AuthContext";
 import { UserContext } from "../contexts/UserContext";
 import { MessageContext } from "../contexts/MessageContext";
 import { UserListContext } from "../contexts/UserListContext";
-import { getImageURL, loadConversationTimeline } from "../helpers/helper";
+import { getImageURL, loadConversationTimeline, readListCache, writeListCache } from "../helpers/helper";
 import { toast } from "sonner";
 
 // Format startedAt into "Today, 5:14 AM" / "Yesterday, 10:39 PM" / "Mon, 5:14 AM"
@@ -27,8 +27,9 @@ export default function CallsTab({ setConversationLoading, onOpenConversation })
   const { setUser } = useContext(UserContext);
   const { setMessages, setCallLogs } = useContext(MessageContext);
   const { setUsers } = useContext(UserListContext);
-  const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // the last call list is shown at once while the fresh one loads
+  const [logs, setLogs] = useState(() => (authUser?._id ? readListCache("calls", authUser._id) : null) || []);
+  const [loading, setLoading] = useState(() => !(authUser?._id && readListCache("calls", authUser._id)?.length));
   const [search, setSearch] = useState("");
   const [visibleCount, setVisibleCount] = useState(10);
   const requestIdRef = useRef(0);
@@ -38,10 +39,13 @@ export default function CallsTab({ setConversationLoading, onOpenConversation })
     try {
       const res = await fetch("/api/calls/history?with_names=1");
       const result = await res.json();
-      if (result.success) setLogs(result.data || []);
+      if (result.success) {
+        setLogs(result.data || []);
+        if (authUser?._id) writeListCache("calls", authUser._id, result.data || []);
+      }
     } catch {}
     setLoading(false);
-  }, []);
+  }, [authUser?._id]);
 
   useEffect(() => {
     fetchLogs();

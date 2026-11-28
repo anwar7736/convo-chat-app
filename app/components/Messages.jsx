@@ -1,7 +1,14 @@
-import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Picker from "emoji-picker-react";
 import { FiAlertCircle, FiArrowLeft, FiChevronDown, FiClock, FiCopy, FiCornerUpLeft, FiEdit2, FiPhoneIncoming, FiPhoneMissed, FiPhoneOutgoing, FiPlus, FiTrash2, FiVideo, FiX } from "react-icons/fi";
-import { dateTimeFormat, getImageURL, socket_connection } from "../helpers/helper";
+import {
+  conversationHistoryState,
+  dateTimeFormat,
+  getImageURL,
+  growConversationWindow,
+  loadConversationTimeline,
+  socket_connection,
+} from "../helpers/helper";
 import { AuthContext } from "../contexts/AuthContext";
 import { UserContext } from "../contexts/UserContext";
 import { toast } from "sonner";
@@ -59,6 +66,56 @@ const Messages = () => {
   const lastCountRef = useRef(0);
   const [showJump, setShowJump] = useState(false); // the ↓ button, shown once scrolled up
   const [unseen, setUnseen] = useState(0);         // messages that arrived while scrolled up
+
+  // Older messages: a chat opens with its newest messages; scrolling to the top (or the button) loads more above them
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const hasOlderRef = useRef(false);
+  const loadingOlderRef = useRef(false);
+  const olderAnchorRef = useRef(null);      // distance from the bottom to keep when older messages appear above
+  const olderJustLoadedRef = useRef(false); // the next change in the list is older messages, not new ones
+  const loadOlderRef = useRef(() => {});
+  hasOlderRef.current = hasOlder;
+  useEffect(() => {
+    if (!conversationUser?._id) { setHasOlder(false); return; }
+    setHasOlder(conversationHistoryState(conversationUser).hasMore);
+    const key = `${Number(conversationUser.is_group) === 1 ? 1 : 0}:${conversationUser._id}`;
+    const onState = (event) => { if (event.detail?.key === key) setHasOlder(Boolean(event.detail.hasMore)); };
+    window.addEventListener("chat:history-state", onState);
+    return () => window.removeEventListener("chat:history-state", onState);
+  }, [conversationUser?._id, conversationUser?.is_group]);
+  const loadOlder = async () => {
+    const el = elementRef.current;
+    const target = conversationUser;
+    if (!el || !target?._id || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      growConversationWindow(target);
+      const timeline = await loadConversationTimeline(target);
+      if (String(conversationUserIdRef.current) !== String(target._id)) return;
+      olderAnchorRef.current = el.scrollHeight - el.scrollTop;
+      olderJustLoadedRef.current = true;
+      setMessages(timeline.messages);
+      setCallLogs(timeline.callLogs);
+    } catch (error) {
+      toast.error(error.message || "Unable to load older messages.");
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  };
+  loadOlderRef.current = loadOlder;
+  const conversationUserIdRef = useRef(conversationUser?._id);
+  conversationUserIdRef.current = conversationUser?._id;
+  // after older messages are added above, keep the same message in view
+  useLayoutEffect(() => {
+    const el = elementRef.current;
+    if (olderAnchorRef.current == null || !el) return;
+    el.scrollTop = el.scrollHeight - olderAnchorRef.current;
+    olderAnchorRef.current = null;
+  }, [messages, callLogs]);
+
   useEffect(() => {
     const el = elementRef.current;
     if (!el) return;
@@ -67,6 +124,12 @@ const Messages = () => {
       Boolean(item?.isGroup) === (Number(conversationUser?.is_group) === 1)
     );
     const count = (messages || []).length + visibleCallLogs.length;
+    if (olderJustLoadedRef.current) {
+      // older messages added at the top: nothing new arrived, so no auto-scroll and no "new messages" count
+      olderJustLoadedRef.current = false;
+      lastCountRef.current = count;
+      return;
+    }
     const added = count - lastCountRef.current;
     const firstLoad = lastCountRef.current === 0;
     lastCountRef.current = count;
@@ -113,6 +176,7 @@ const Messages = () => {
       stickToBottomRef.current = distance < 160;
       setShowJump(distance > 300);
       if (distance < 160) setUnseen(0);
+      if (el.scrollTop < 120 && hasOlderRef.current) loadOlderRef.current();
     };
     const onMediaLoad = () => {
       if (stickToBottomRef.current) el.scrollTop = el.scrollHeight;
@@ -916,6 +980,18 @@ const Messages = () => {
         </div>
       )}
       <div className="message-scroll" id="root" ref={elementRef}>
+        {hasOlder && timelineItems.length > 0 && (
+          <div className="mb-3 flex justify-center">
+            <button
+              type="button"
+              className="rounded-full border border-[#263248] bg-[#111827] px-4 py-1.5 text-xs text-[#c7d2e3] disabled:opacity-60"
+              onClick={loadOlder}
+              disabled={loadingOlder}
+            >
+              {loadingOlder ? "Loading…" : "Load older messages"}
+            </button>
+          </div>
+        )}
         {!timelineItems.length && (
           <div className="grid min-h-full place-items-center text-center text-sm text-[#91a0b7]">
             <div>
@@ -1077,7 +1153,9 @@ const Messages = () => {
                         }}
                         title="Go to message"
                       >
-                        ↪ {repliedTo?.sender?._id === user?._id ? "You" : repliedTo?.sender?.name || "Message"}: {repliedTo?.message?.message || repliedTo?.message?.attachmentName || "Reply"}
+                        ↪ {repliedTo
+                          ? `${repliedTo.sender?._id === user?._id ? "You" : repliedTo.sender?.name || "Message"}: ${repliedTo.message?.message || repliedTo.message?.attachmentName || "Reply"}`
+                          : `${data?.message?.reply_preview?.sender_id === user?._id ? "You" : data?.message?.reply_preview?.sender_name || "Message"}: ${data?.message?.reply_preview?.text || "Reply"}`}
                       </button>
                     )}
                     {data?.message?.deletedForEveryone ? (

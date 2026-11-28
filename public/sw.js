@@ -147,10 +147,10 @@ self.addEventListener("push", (event) => {
       vibrate: [120, 60, 120],
       timestamp: Date.now(),
       // like WhatsApp: Reply (typed right in the notification where the phone supports it), Mark as read, Mute
+      // (phones show two buttons: a single message offers Mark as read, several stacked ones offer Mute instead)
       actions: payload.ticket ? [
         { action: "reply", title: "Reply", type: "text", placeholder: "Type a reply" },
-        { action: "mark-read", title: "Mark as read" },
-        { action: "mute", title: "Mute" },
+        count > 1 ? { action: "mute", title: "Mute" } : { action: "mark-read", title: "Mark as read" },
       ] : [],
       data: {
         url: payload.url || "/",

@@ -150,6 +150,17 @@ function detectAudioRoutes(devices) {
   return { hasBt, hasWired };
 }
 
+// what a microphone/output device is, from its label: drives the list rows and the Audio button's icon
+function audioDeviceKind(label) {
+  const text = label || "";
+  if (/bluetooth|airpods|buds/i.test(text)) return "bluetooth";
+  if (/earpiece|receiver/i.test(text)) return "earpiece";
+  if (/wired|headphone|earphone|usb|headset/i.test(text)) return "headset";
+  if (/speaker/i.test(text)) return "speaker";
+  return "other";
+}
+const AUDIO_KIND_NAME = { bluetooth: "Bluetooth", earpiece: "Earpiece", headset: "Headphones", speaker: "Speaker" };
+
 export default function CallControls({ conversation: conversationProp, currentUser, showButtons = true, blocked = false }) {
   const conversation = conversationProp;
   const { users } = useContext(UserListContext) || {};
@@ -368,19 +379,14 @@ export default function CallControls({ conversation: conversationProp, currentUs
   const prevRouteKeyRef = useRef("speaker");
   useEffect(() => {
     if (!call) { prevRouteKeyRef.current = "speaker"; return; }
-    const { hasBt, hasWired } = detectAudioRoutes(audioDevices);
-    const key = hasBt ? "bluetooth" : hasWired ? "headset" : "speaker";
+    // the one list is the microphones: a Bluetooth microphone that appears is chosen for you (the phone then sends the
+    // sound to the same headset); when it goes away the default microphone comes back
+    const btMic = audioDevices.find((d) => d.kind === "audioinput" && audioDeviceKind(d.label) === "bluetooth");
+    const key = btMic ? "bluetooth" : "default";
     if (key === prevRouteKeyRef.current) return;
     prevRouteKeyRef.current = key;
-    if (key === "bluetooth") {
-      setAudioRoute("bluetooth");
-      changeAudioRoute("bluetooth");
-    } else if (key === "headset") {
-      setAudioRoute("headset");
-    } else if (audioRoute === "bluetooth" || audioRoute === "headset") {
-      changeAudioRoute("speaker");
-      setAudioRoute("speaker");
-    }
+    if (btMic) changeAudioInput(btMic.deviceId, true);
+    else if (audioInputId) changeAudioInput("", true);
   }, [audioDevices, call?.callId]);
 
   useEffect(() => {
@@ -401,7 +407,8 @@ export default function CallControls({ conversation: conversationProp, currentUs
     };
   }, [audioMenuOpen]);
 
-  const changeAudioInput = async (deviceId) => {
+  // `silent`: an automatic retry (not something the person asked for) never shows an error toast
+  const changeAudioInput = async (deviceId, silent = false) => {
     const stream = localStreamRef.current;
     if (!stream) return;
     try {
@@ -427,7 +434,7 @@ export default function CallControls({ conversation: conversationProp, currentUs
       stream.addTrack(nextTrack);
       setAudioInputId(deviceId);
     } catch (error) {
-      toast.error(error.message || "Unable to switch microphone.");
+      if (!silent) toast.error(error.message || "Unable to switch microphone.");
     }
   };
 
@@ -465,6 +472,18 @@ export default function CallControls({ conversation: conversationProp, currentUs
       microphones.find((device) => settings.groupId && device.groupId === settings.groupId);
     setActiveMicId(match?.deviceId || "");
   }, [call?.callId, call?.mediaConnected, audioDevices, audioInputId]);
+
+  // the microphone really in use (read from the live track), or the phone's default one; the list marks it and the
+  // Audio button shows its icon
+  const defaultInput = audioDevices.find((d) => d.kind === "audioinput" && d.deviceId === "default");
+  const selectedMicId = activeMicId ||
+    microphones.find((d) => defaultInput?.groupId && d.groupId === defaultInput.groupId)?.deviceId ||
+    microphones[0]?.deviceId || "";
+  const selectedMicKind = audioDeviceKind(microphones.find((d) => d.deviceId === selectedMicId)?.label);
+  const audioKindIcon = (kind) => kind === "bluetooth" ? FiBluetooth
+    : kind === "headset" ? FiHeadphones
+      : kind === "earpiece" ? FiSmartphone
+        : FiVolume2;
 
   const changeAudioRoute = async (route) => {
     const outputs = audioDevices.filter((device) => device.kind === "audiooutput");
@@ -1636,7 +1655,7 @@ export default function CallControls({ conversation: conversationProp, currentUs
       lastAttempt = Date.now();
       regaining = true;
       try {
-        await changeAudioInput(audioInputId);
+        await changeAudioInput(audioInputId, true);
       } finally {
         regaining = false;
       }
@@ -2021,55 +2040,44 @@ export default function CallControls({ conversation: conversationProp, currentUs
                     <div className="call-action call-audio-action" ref={audioMenuRef}>
                       <button
                         type="button"
-                        className={`call-round ${audioMenuOpen || audioRoute !== "speaker" ? "is-on" : ""}`}
+                        className={`call-round ${audioMenuOpen || selectedMicKind === "bluetooth" || selectedMicKind === "headset" ? "is-on" : ""}`}
                         onClick={() => setAudioMenuOpen((open) => !open)}
                         aria-label="Choose audio output"
                         aria-expanded={audioMenuOpen}
                         aria-haspopup="menu"
                         title="Audio output"
                       >
-                        {audioRoute === "bluetooth" ? <FiBluetooth /> : audioRoute === "headset" ? <FiHeadphones /> : audioRoute === "earpiece" ? <FiSmartphone /> : <FiVolume2 />}
+                        {(() => {
+                          const KindIcon = audioKindIcon(selectedMicKind);
+                          return <KindIcon />;
+                        })()}
                       </button>
                       <span>Audio</span>
                       {audioMenuOpen && (
-                        <div className="call-audio-menu" role="menu" aria-label="Audio output">
-                          {(() => {
-                            // Speaker and Earpiece are always there; Bluetooth / Headset appear while connected (or chosen),
-                            // so an option never vanishes from the list after you pick another one
-                            const { hasBt, hasWired } = detectAudioRoutes(audioDevices);
-                            return [
-                              { id: "speaker", label: "Speaker", icon: FiVolume2 },
-                              { id: "earpiece", label: "Earpiece", icon: FiSmartphone },
-                              ...(hasBt || audioRoute === "bluetooth" || typeof navigator.mediaDevices?.selectAudioOutput === "function"
-                                ? [{ id: "bluetooth", label: "Bluetooth", icon: FiBluetooth }] : []),
-                              ...(hasWired || audioRoute === "headset"
-                                ? [{ id: "headset", label: "Headphones", icon: FiHeadphones }] : []),
-                            ];
-                          })().map(({ id, label, icon: Icon }) => (
-                            <button
-                              key={id}
-                              type="button"
-                              role="menuitemradio"
-                              aria-checked={audioRoute === id}
-                              className={audioRoute === id ? "is-selected" : ""}
-                              onClick={() => changeAudioRoute(id)}
-                            >
-                              <Icon />
-                              <span>{label}</span>
-                              {audioRoute === id && <FiCheck className="call-audio-check" />}
-                            </button>
-                          ))}
-                          {microphones.length > 1 && (
-                            <label className="call-microphone-picker">
-                              <span><FiMic /> Microphone</span>
-                              <select value={activeMicId} onChange={(event) => changeAudioInput(event.target.value)}>
-                                <option value="">Default</option>
-                                {microphones.map((device, index) => (
-                                  <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>
-                                ))}
-                              </select>
-                            </label>
-                          )}
+                        <div className="call-audio-menu" role="menu" aria-label="Audio device">
+                          {microphones.length === 0 && <p className="call-audio-empty">No audio devices found.</p>}
+                          {microphones.map((device, index) => {
+                            const kind = audioDeviceKind(device.label);
+                            const Icon = audioKindIcon(kind);
+                            const selected = device.deviceId === selectedMicId;
+                            return (
+                              <button
+                                key={device.deviceId || index}
+                                type="button"
+                                role="menuitemradio"
+                                aria-checked={selected}
+                                className={selected ? "is-selected" : ""}
+                                onClick={() => {
+                                  changeAudioInput(device.deviceId);
+                                  setAudioMenuOpen(false);
+                                }}
+                              >
+                                <Icon />
+                                <span>{AUDIO_KIND_NAME[kind] || device.label || `Microphone ${index + 1}`}</span>
+                                {selected && <FiCheck className="call-audio-check" />}
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
